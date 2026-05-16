@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import Foundation
+import OrderedCollections
 import SupacodeSettingsShared
 import Testing
 
@@ -230,6 +231,213 @@ struct RepositoriesFeatureSidebarTests {
     var state = RepositoriesFeature.State()
     state.repositories = IdentifiedArray(uniqueElements: [repository])
     state.repositoryRoots = [repository.rootURL]
+    // Seed an empty sidebar section so reducer actions that gate on
+    // section presence (e.g. `branchNestExpansionChanged`) behave the
+    // same way they would after the production reconcile pass.
+    state.$sidebar.withLock { sidebar in
+      sidebar.sections[repository.id] = .init()
+    }
     return state
+  }
+
+  // MARK: - branchNestExpansionChanged
+
+  @Test func branchNestExpansionChangedInsertsPrefix() async {
+    let repoID = "/tmp/repo/"
+    let store = TestStore(
+      initialState: makeState(
+        repository: Repository(
+          id: repoID,
+          rootURL: URL(fileURLWithPath: repoID),
+          name: "repo",
+          worktrees: []
+        )
+      ),
+      reducer: { RepositoriesFeature() }
+    )
+    store.exhaustivity = .off
+
+    await store.send(
+      .branchNestExpansionChanged(
+        repositoryID: repoID,
+        bucketID: .unpinned,
+        prefix: "feature",
+        isExpanded: false
+      )
+    )
+    #expect(
+      store.state.sidebar.sections[repoID]?.buckets[.unpinned]?.collapsedBranchPrefixes
+        == ["feature"]
+    )
+  }
+
+  @Test func branchNestExpansionChangedRemovesPrefix() async {
+    let repoID = "/tmp/repo/"
+    var initialState = makeState(
+      repository: Repository(
+        id: repoID,
+        rootURL: URL(fileURLWithPath: repoID),
+        name: "repo",
+        worktrees: []
+      )
+    )
+    initialState.$sidebar.withLock { sidebar in
+      sidebar.sections[repoID] = .init(
+        buckets: [.unpinned: .init(collapsedBranchPrefixes: ["feature"])]
+      )
+    }
+
+    let store = TestStore(initialState: initialState, reducer: { RepositoriesFeature() })
+    store.exhaustivity = .off
+
+    await store.send(
+      .branchNestExpansionChanged(
+        repositoryID: repoID,
+        bucketID: .unpinned,
+        prefix: "feature",
+        isExpanded: true
+      )
+    )
+    #expect(
+      store.state.sidebar.sections[repoID]?.buckets[.unpinned]?.collapsedBranchPrefixes.isEmpty
+        == true
+    )
+  }
+
+  @Test func collapsedPrefixesAreNeverClearedByBranchNestExpansionAction() async {
+    // Toggling the AppStorage grouping switch must not clear `collapsedBranchPrefixes`.
+    // The toggle is read-only AppStorage outside the reducer; this test guards the
+    // related invariant that the only sidebar mutation that exists touches the field
+    // additively, never clearing the set on unrelated transitions.
+    let repoID = "/tmp/repo/"
+    var initialState = makeState(
+      repository: Repository(
+        id: repoID,
+        rootURL: URL(fileURLWithPath: repoID),
+        name: "repo",
+        worktrees: []
+      )
+    )
+    initialState.$sidebar.withLock { sidebar in
+      sidebar.sections[repoID] = .init(
+        buckets: [
+          .pinned: .init(collapsedBranchPrefixes: ["feature", "feature/tools"]),
+          .unpinned: .init(collapsedBranchPrefixes: ["chore"]),
+        ]
+      )
+    }
+
+    let store = TestStore(initialState: initialState, reducer: { RepositoriesFeature() })
+    store.exhaustivity = .off
+
+    // Collapse a different prefix; the unrelated entries must stay intact.
+    await store.send(
+      .branchNestExpansionChanged(
+        repositoryID: repoID,
+        bucketID: .pinned,
+        prefix: "release",
+        isExpanded: false
+      )
+    )
+    #expect(
+      store.state.sidebar.sections[repoID]?.buckets[.pinned]?.collapsedBranchPrefixes
+        == ["feature", "feature/tools", "release"]
+    )
+    #expect(
+      store.state.sidebar.sections[repoID]?.buckets[.unpinned]?.collapsedBranchPrefixes
+        == ["chore"]
+    )
+  }
+
+  @Test func branchNestExpansionChangedRejectsArchivedBucket() async {
+    // `.archived` never renders nested rows; the action must refuse to write
+    // collapse state into a bucket that has no chevron to drive it.
+    let repoID = "/tmp/repo/"
+    let store = TestStore(
+      initialState: makeState(
+        repository: Repository(
+          id: repoID,
+          rootURL: URL(fileURLWithPath: repoID),
+          name: "repo",
+          worktrees: []
+        )
+      ),
+      reducer: { RepositoriesFeature() }
+    )
+    store.exhaustivity = .off
+
+    await store.send(
+      .branchNestExpansionChanged(
+        repositoryID: repoID,
+        bucketID: .archived,
+        prefix: "feature",
+        isExpanded: false
+      )
+    )
+    #expect(store.state.sidebar.sections[repoID]?.buckets[.archived] == nil)
+  }
+
+  @Test func branchNestExpansionChangedIgnoresUnknownRepository() async {
+    // The chevron is unreachable without an existing section, so any action
+    // hitting this path for an unknown repo is stale UI / deeplink noise.
+    // Writing through anyway would materialize a phantom section in
+    // `sidebar.json` that nothing else cleans up.
+    let knownRepoID = "/tmp/repo/"
+    let unknownRepoID = "/tmp/other/"
+    let store = TestStore(
+      initialState: makeState(
+        repository: Repository(
+          id: knownRepoID,
+          rootURL: URL(fileURLWithPath: knownRepoID),
+          name: "repo",
+          worktrees: []
+        )
+      ),
+      reducer: { RepositoriesFeature() }
+    )
+    store.exhaustivity = .off
+
+    await store.send(
+      .branchNestExpansionChanged(
+        repositoryID: unknownRepoID,
+        bucketID: .unpinned,
+        prefix: "feature",
+        isExpanded: false
+      )
+    )
+    #expect(store.state.sidebar.sections[unknownRepoID] == nil)
+  }
+
+  @Test func branchNestExpansionPinnedAndUnpinnedAreIndependent() async {
+    let repoID = "/tmp/repo/"
+    let store = TestStore(
+      initialState: makeState(
+        repository: Repository(
+          id: repoID,
+          rootURL: URL(fileURLWithPath: repoID),
+          name: "repo",
+          worktrees: []
+        )
+      ),
+      reducer: { RepositoriesFeature() }
+    )
+    store.exhaustivity = .off
+
+    await store.send(
+      .branchNestExpansionChanged(
+        repositoryID: repoID,
+        bucketID: .pinned,
+        prefix: "feature",
+        isExpanded: false
+      )
+    )
+    #expect(
+      store.state.sidebar.sections[repoID]?.buckets[.pinned]?.collapsedBranchPrefixes
+        == ["feature"]
+    )
+    #expect(
+      store.state.sidebar.sections[repoID]?.buckets[.unpinned]?.collapsedBranchPrefixes ?? []
+        == []
+    )
   }
 }
