@@ -399,16 +399,22 @@ jobs:
           printf "%s" "$SPARKLE_PRIVATE_KEY" | tr -d '\r\n\t ' | ./bins/generate_appcast --download-url-prefix "https://supacode.sh/download/$TAG/" --full-release-notes-url "https://github.com/supabitapp/supacode/releases" --embed-release-notes --maximum-versions $MAX_DELTAS --maximum-deltas $MAX_DELTAS --delta-compression lzma --ed-key-file - "$STAGING"
           cp "$STAGING/appcast.xml" build/appcast.xml
           find "$STAGING" -name "*.delta" -exec cp {} build/ \; 2>/dev/null || true
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          DELTA_FILES=$(find build -name "*.delta" -type f | sort | tr '\n' ' ' || true)
+          python3 scripts/generate_release_checksums.py "$TAG" build/checksums.json build/supacode.dmg build/supacode.app.zip build/appcast.xml $DELTA_FILES
       - name: Create release and upload assets
         run: |
           set -euo pipefail
           gh release create "$TAG" --title "$TAG" --notes-file build/release-notes.md --target "${{ github.sha }}" -R "$RELEASE_REPO" 2>/dev/null || \
           gh release edit "$TAG" --target "${{ github.sha }}" -R "$RELEASE_REPO"
           DELTA_FILES=$(find build -name "*.delta" -type f 2>/dev/null | tr '\n' ' ' || true)
-          gh release upload "$TAG" build/supacode.app.zip build/supacode.dmg build/appcast.xml $DELTA_FILES --clobber -R "$RELEASE_REPO"
+          gh release upload "$TAG" build/supacode.app.zip build/supacode.dmg build/appcast.xml build/checksums.json $DELTA_FILES --clobber -R "$RELEASE_REPO"
       - name: Verify download URLs
         run: |
           set -euo pipefail
+          curl -fsSL "https://supacode.sh/download/$TAG/checksums.json" -o /dev/null
           curl -fsSL "https://supacode.sh/download/$TAG/supacode.app.zip" -o /dev/null
           curl -fsSL "https://supacode.sh/download/$TAG/supacode.dmg" -o /dev/null
 
@@ -421,6 +427,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v7
         with:
           name: build-artifacts
@@ -439,7 +446,8 @@ jobs:
           done
 
           DELTA_FILES=$(find build -name "*.delta" -type f 2>/dev/null | tr '\n' ' ' || true)
-          gh release upload tip build/supacode.dmg build/supacode.app.zip build/appcast.xml $DELTA_FILES --clobber -R "${{ github.repository }}"
+          python3 scripts/generate_release_checksums.py tip build/checksums.json build/supacode.dmg build/supacode.app.zip build/appcast.xml $DELTA_FILES
+          gh release upload tip build/supacode.dmg build/supacode.app.zip build/appcast.xml build/checksums.json $DELTA_FILES --clobber -R "${{ github.repository }}"
 
           # Store current build as history asset for future delta generation
           MAX_DELTAS=10
