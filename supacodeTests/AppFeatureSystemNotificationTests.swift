@@ -227,7 +227,7 @@ struct AppFeatureSystemNotificationTests {
   @Test(.dependencies) func notificationReceivedPlaysLocalSoundForViewedSurfaceWhenMuteDisabled() async {
     var globalSettings = GlobalSettings.default
     globalSettings.systemNotificationsEnabled = false
-    globalSettings.notificationSoundEnabled = true
+    globalSettings.notificationSound = .hero
     globalSettings.muteNotificationsForActiveSurface = false
     let plays = LockIsolated(0)
     let store = TestStore(
@@ -237,7 +237,7 @@ struct AppFeatureSystemNotificationTests {
     ) {
       AppFeature()
     } withDependencies: {
-      $0.notificationSoundClient.play = {
+      $0.notificationSoundClient.play = { _ in
         plays.withValue { $0 += 1 }
       }
     }
@@ -262,7 +262,7 @@ struct AppFeatureSystemNotificationTests {
   @Test(.dependencies) func notificationReceivedSkipsLocalSoundWhenSurfaceIsViewed() async {
     var globalSettings = GlobalSettings.default
     globalSettings.systemNotificationsEnabled = false
-    globalSettings.notificationSoundEnabled = true
+    globalSettings.notificationSound = .hero
     let plays = LockIsolated(0)
     let store = TestStore(
       initialState: AppFeature.State(
@@ -271,7 +271,7 @@ struct AppFeatureSystemNotificationTests {
     ) {
       AppFeature()
     } withDependencies: {
-      $0.notificationSoundClient.play = {
+      $0.notificationSoundClient.play = { _ in
         plays.withValue { $0 += 1 }
       }
     }
@@ -296,7 +296,7 @@ struct AppFeatureSystemNotificationTests {
   @Test(.dependencies) func notificationReceivedSkipsBothChannelsForViewedSurface() async {
     var globalSettings = GlobalSettings.default
     globalSettings.systemNotificationsEnabled = true
-    globalSettings.notificationSoundEnabled = true
+    globalSettings.notificationSound = .hero
     // muteNotificationsForActiveSurface defaults to true; the muted banner must
     // not leak into the sound fallback.
     let sends = LockIsolated(0)
@@ -311,7 +311,7 @@ struct AppFeatureSystemNotificationTests {
       $0.systemNotificationClient.send = { _, _, _ in
         sends.withValue { $0 += 1 }
       }
-      $0.notificationSoundClient.play = {
+      $0.notificationSoundClient.play = { _ in
         plays.withValue { $0 += 1 }
       }
       $0.terminalClient.tabID = { _, _ in nil }
@@ -338,7 +338,6 @@ struct AppFeatureSystemNotificationTests {
   @Test(.dependencies) func notificationReceivedSkipsLocalSoundWhenSystemNotificationsEnabled() async {
     var globalSettings = GlobalSettings.default
     globalSettings.systemNotificationsEnabled = true
-    globalSettings.notificationSoundEnabled = true
     let plays = LockIsolated(0)
     let store = TestStore(
       initialState: AppFeature.State(
@@ -347,7 +346,7 @@ struct AppFeatureSystemNotificationTests {
     ) {
       AppFeature()
     } withDependencies: {
-      $0.notificationSoundClient.play = {
+      $0.notificationSoundClient.play = { _ in
         plays.withValue { $0 += 1 }
       }
       $0.systemNotificationClient.send = { _, _, _ in }
@@ -374,8 +373,8 @@ struct AppFeatureSystemNotificationTests {
   @Test(.dependencies) func notificationReceivedPlaysLocalSoundWhenSystemNotificationsDisabled() async {
     var globalSettings = GlobalSettings.default
     globalSettings.systemNotificationsEnabled = false
-    globalSettings.notificationSoundEnabled = true
-    let plays = LockIsolated(0)
+    globalSettings.notificationSound = .funk
+    let plays = LockIsolated<[NotificationSound]>([])
     let sends = LockIsolated(0)
     let store = TestStore(
       initialState: AppFeature.State(
@@ -384,8 +383,8 @@ struct AppFeatureSystemNotificationTests {
     ) {
       AppFeature()
     } withDependencies: {
-      $0.notificationSoundClient.play = {
-        plays.withValue { $0 += 1 }
+      $0.notificationSoundClient.play = { sound in
+        plays.withValue { $0.append(sound) }
       }
       $0.systemNotificationClient.send = { _, _, _ in
         sends.withValue { $0 += 1 }
@@ -406,7 +405,46 @@ struct AppFeatureSystemNotificationTests {
     )
     await store.finish()
 
-    #expect(plays.value == 1)
+    #expect(plays.value == [.funk])
+    #expect(sends.value == 0)
+  }
+
+  @Test(.dependencies) func notificationReceivedSkipsLocalSoundWhenNever() async {
+    var globalSettings = GlobalSettings.default
+    globalSettings.systemNotificationsEnabled = false
+    globalSettings.notificationSound = .never
+    let plays = LockIsolated<[NotificationSound]>([])
+    let sends = LockIsolated(0)
+    let store = TestStore(
+      initialState: AppFeature.State(
+        settings: SettingsFeature.State(settings: globalSettings)
+      )
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.notificationSoundClient.play = { sound in
+        plays.withValue { $0.append(sound) }
+      }
+      $0.systemNotificationClient.send = { _, _, _ in
+        sends.withValue { $0 += 1 }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .terminalEvent(
+        .notificationReceived(
+          worktreeID: "/tmp/repo/wt-1",
+          surfaceID: UUID(),
+          title: "Done",
+          body: "Build succeeded",
+          isViewed: false
+        )
+      )
+    )
+    await store.finish()
+
+    #expect(plays.value.isEmpty)
     #expect(sends.value == 0)
   }
 }

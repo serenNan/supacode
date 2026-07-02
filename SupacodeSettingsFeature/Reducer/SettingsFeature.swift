@@ -47,7 +47,7 @@ public struct SettingsFeature {
     public var updatesAutomaticallyCheckForUpdates: Bool
     public var updatesAutomaticallyDownloadUpdates: Bool
     public var inAppNotificationsEnabled: Bool
-    public var notificationSoundEnabled: Bool
+    public var notificationSound: NotificationSound
     public var systemNotificationsEnabled: Bool
     public var muteNotificationsForActiveSurface: Bool
     public var moveNotifiedWorktreeToTop: Bool
@@ -85,7 +85,7 @@ public struct SettingsFeature {
     /// True when at least one notification delivery channel (macOS banner or
     /// the fallback sound) can fire, so surface-mute has something to mute.
     public var hasActiveNotificationChannel: Bool {
-      systemNotificationsEnabled || notificationSoundEnabled
+      systemNotificationsEnabled || notificationSound != .never
     }
 
     public init(settings: GlobalSettings = .default) {
@@ -96,7 +96,7 @@ public struct SettingsFeature {
       updatesAutomaticallyCheckForUpdates = settings.updatesAutomaticallyCheckForUpdates
       updatesAutomaticallyDownloadUpdates = settings.updatesAutomaticallyDownloadUpdates
       inAppNotificationsEnabled = settings.inAppNotificationsEnabled
-      notificationSoundEnabled = settings.notificationSoundEnabled
+      notificationSound = settings.notificationSound
       systemNotificationsEnabled = settings.systemNotificationsEnabled
       muteNotificationsForActiveSurface = settings.muteNotificationsForActiveSurface
       moveNotifiedWorktreeToTop = settings.moveNotifiedWorktreeToTop
@@ -133,7 +133,7 @@ public struct SettingsFeature {
         updatesAutomaticallyCheckForUpdates: updatesAutomaticallyCheckForUpdates,
         updatesAutomaticallyDownloadUpdates: updatesAutomaticallyDownloadUpdates,
         inAppNotificationsEnabled: inAppNotificationsEnabled,
-        notificationSoundEnabled: notificationSoundEnabled,
+        notificationSound: notificationSound,
         systemNotificationsEnabled: systemNotificationsEnabled,
         muteNotificationsForActiveSurface: muteNotificationsForActiveSurface,
         moveNotifiedWorktreeToTop: moveNotifiedWorktreeToTop,
@@ -212,6 +212,7 @@ public struct SettingsFeature {
   @Dependency(AgentIntegrationClient.self) private var agentIntegrationClient
   @Dependency(ArchivedWorktreeDatesClient.self) private var archivedWorktreeDatesClient
   @Dependency(SystemNotificationClient.self) private var systemNotificationClient
+  @Dependency(NotificationSoundClient.self) private var notificationSoundClient
   @Dependency(\.date.now) private var now
 
   public init() {}
@@ -272,7 +273,7 @@ public struct SettingsFeature {
         state.updatesAutomaticallyCheckForUpdates = normalizedSettings.updatesAutomaticallyCheckForUpdates
         state.updatesAutomaticallyDownloadUpdates = normalizedSettings.updatesAutomaticallyDownloadUpdates
         state.inAppNotificationsEnabled = normalizedSettings.inAppNotificationsEnabled
-        state.notificationSoundEnabled = normalizedSettings.notificationSoundEnabled
+        state.notificationSound = normalizedSettings.notificationSound
         state.systemNotificationsEnabled = normalizedSettings.systemNotificationsEnabled
         state.muteNotificationsForActiveSurface = normalizedSettings.muteNotificationsForActiveSurface
         state.moveNotifiedWorktreeToTop = normalizedSettings.moveNotifiedWorktreeToTop
@@ -301,6 +302,18 @@ public struct SettingsFeature {
         state.syncGlobalDefaults(from: normalizedSettings)
         synchronizeRepositorySelection(for: &state)
         return .send(.delegate(.settingsChanged(normalizedSettings)))
+
+      case .binding(\.notificationSound):
+        let sound = state.notificationSound
+        // Preview the chosen sound, but only on the in-app path: with system
+        // notifications on, the banner plays the macOS default instead. `.never`
+        // has nothing to audition.
+        let shouldPreview = !state.systemNotificationsEnabled && sound != .never
+        state.syncGlobalDefaults(from: state.globalSettings)
+        return .merge(
+          persist(state),
+          shouldPreview ? .run { _ in await notificationSoundClient.play(sound) } : .none
+        )
 
       case .binding:
         state.syncGlobalDefaults(from: state.globalSettings)

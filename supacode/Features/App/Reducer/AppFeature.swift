@@ -1204,10 +1204,11 @@ struct AppFeature {
             }
           )
         }
-        if state.settings.notificationSoundEnabled && !state.settings.systemNotificationsEnabled && !isMuted {
+        if state.settings.notificationSound != .never && !state.settings.systemNotificationsEnabled && !isMuted {
+          let sound = state.settings.notificationSound
           effects.append(
             .run { _ in
-              await notificationSoundClient.play()
+              await notificationSoundClient.play(sound)
             }
           )
         }
