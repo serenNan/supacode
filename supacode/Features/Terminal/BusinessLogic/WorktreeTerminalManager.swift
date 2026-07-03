@@ -1,5 +1,7 @@
+import AppKit
 import ComposableArchitecture
 import Foundation
+import GhosttyKit
 import Observation
 import Sharing
 import SupacodeSettingsShared
@@ -115,6 +117,12 @@ final class WorktreeTerminalManager {
   }
 
   var selectedWorktreeID: Worktree.ID?
+  /// The resolved background of the focused surface in the selected worktree
+  /// (OSC 11 override or theme fallback). Single source for the window tint,
+  /// `window.appearance`, and the toolbar title's color scheme.
+  private(set) var focusedSurfaceBackground: NSColor
+  @ObservationIgnored
+  private nonisolated(unsafe) var runtimeObservers: [NSObjectProtocol] = []
   var saveLayoutSnapshot: ((Worktree.ID, TerminalLayoutSnapshot?) -> Void)?
   var loadLayoutSnapshot: ((Worktree.ID) -> TerminalLayoutSnapshot?)?
   /// Deeplink URL received from the CLI via socket. Second parameter is the client FD for response.
@@ -128,10 +136,21 @@ final class WorktreeTerminalManager {
     clock: C = ContinuousClock(),
   ) {
     self.runtime = runtime
+    self.focusedSurfaceBackground = runtime.backgroundColor()
     self.hookEventSleep = { duration in try await clock.sleep(for: duration) }
     self.layoutDebounceSleep = { duration in try await clock.sleep(for: duration) }
     @Dependency(\.settingsFileStorage) var settingsFileStorage
     self.layoutsWriter = LayoutsIncrementalWriter(storage: settingsFileStorage)
+    // A theme reload changes the fallback and every non-OSC surface background.
+    runtimeObservers.append(
+      NotificationCenter.default.addObserver(
+        forName: .ghosttyRuntimeConfigDidChange,
+        object: runtime,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor [weak self] in self?.refreshFocusedSurfaceBackground() }
+      }
+    )
     let resolvedServer = socketServer ?? AgentHookSocketServer()
     guard resolvedServer.socketPath != nil else {
       self.socketServer = nil
@@ -146,6 +165,9 @@ final class WorktreeTerminalManager {
     for task in pendingIdleHookEvents.values { task.cancel() }
     for task in layoutDirtyTasks.values { task.cancel() }
     for task in layoutFlushTasks.values { task.cancel() }
+    for observer in runtimeObservers {
+      NotificationCenter.default.removeObserver(observer)
+    }
   }
 
   private func configureSocketServer(_ server: AgentHookSocketServer) {
@@ -385,6 +407,9 @@ final class WorktreeTerminalManager {
         markLayoutDirty(worktreeID: previousID)
       }
       selectedWorktreeID = id
+      // A sidebar click never hands AppKit focus to the terminal, so no focus
+      // event fires; refresh here or the window keeps the previous tint.
+      refreshFocusedSurfaceBackground()
       terminalLogger.info("Selected worktree \(id?.rawValue ?? "nil")")
     case .createTab, .createTabWithInput, .ensureInitialTab, .stopRunScript, .stopScript,
       .runBlockingScript, .closeFocusedTab, .closeFocusedSurface, .performBindingAction,
@@ -478,6 +503,9 @@ final class WorktreeTerminalManager {
     }
     state.onSurfacesClosed = { [weak self] ids in
       self?.emit(.surfacesClosed(worktreeID: worktree.id, ids))
+      // The last surface closing leaves no focus target, so no focus event
+      // follows; fall back to the theme background here.
+      self?.refreshFocusedSurfaceBackground()
     }
     // OSC-sourced presence events go through the existing idle-debounce funnel.
     state.onAgentHookEvent = { [weak self] event in
@@ -514,6 +542,10 @@ final class WorktreeTerminalManager {
     }
     state.onFocusChanged = { [weak self] surfaceID in
       self?.emit(.focusChanged(worktreeID: worktree.id, surfaceID: surfaceID))
+      self?.refreshFocusedSurfaceBackground()
+    }
+    state.onFocusedSurfaceColorChanged = { [weak self] in
+      self?.refreshFocusedSurfaceBackground()
     }
     state.onTaskStatusChanged = { [weak self] status in
       self?.emit(.taskStatusChanged(worktreeID: worktree.id, status: status))
@@ -614,6 +646,7 @@ final class WorktreeTerminalManager {
     for (id, _) in removed { invalidateCaches(forPrunedWorktree: id) }
     emitNotificationIndicatorCountIfNeeded()
     emitHasAnyTerminalSurfaceIfNeeded()
+    refreshFocusedSurfaceBackground()
     killZmxSessions(prunedSessionIDs)
   }
 
@@ -897,8 +930,46 @@ final class WorktreeTerminalManager {
     state.rememberFocusedZoom()
   }
 
-  func surfaceBackgroundColorScheme() -> ColorScheme {
-    runtime.backgroundColorScheme()
+  private func resolveFocusedSurfaceBackground() -> NSColor {
+    guard let selectedWorktreeID,
+      let state = states[selectedWorktreeID],
+      let surfaceState = state.focusedSurfaceState()
+    else { return runtime.backgroundColor() }
+    return Self.osc11BackgroundColor(
+      kind: surfaceState.colorChangeKind,
+      red: surfaceState.colorChangeR,
+      green: surfaceState.colorChangeG,
+      blue: surfaceState.colorChangeB
+    ) ?? runtime.backgroundColor()
+  }
+
+  // OSC 11 sets the background; OSC 10/12 (foreground/cursor) and palette kinds
+  // do not affect the window tint, so only the background kind resolves a color.
+  static func osc11BackgroundColor(
+    kind: ghostty_action_color_kind_e?,
+    red: UInt8?,
+    green: UInt8?,
+    blue: UInt8?
+  ) -> NSColor? {
+    guard kind == GHOSTTY_ACTION_COLOR_KIND_BACKGROUND,
+      let red, let green, let blue
+    else { return nil }
+    return NSColor(
+      srgbRed: CGFloat(red) / 255,
+      green: CGFloat(green) / 255,
+      blue: CGFloat(blue) / 255,
+      alpha: 1
+    )
+  }
+
+  // The single funnel for focused-background changes: dedupes on the resolved
+  // color so identical focus moves post nothing, then updates the stored source
+  // and notifies the AppKit consumers (window appearance, tint backdrop).
+  func refreshFocusedSurfaceBackground() {
+    let color = resolveFocusedSurfaceBackground()
+    guard !color.matchesTint(focusedSurfaceBackground) else { return }
+    focusedSurfaceBackground = color
+    NotificationCenter.default.post(name: .ghosttyFocusedSurfaceBackgroundDidChange, object: self)
   }
 
   var ghosttyRuntime: GhosttyRuntime { runtime }

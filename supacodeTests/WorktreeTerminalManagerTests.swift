@@ -1,3 +1,4 @@
+import AppKit
 import Clocks
 import Dependencies
 import Foundation
@@ -2605,5 +2606,91 @@ struct WorktreeTerminalManagerTests {
     // Sanity: a sibling mutation also doesn't drift A's surface set.
     _ = surfaceA
     #expect(state.surfaceIDs(inTab: tabA) == tabASurfaces)
+  }
+
+  @Test func osc11BackgroundColorResolvesBackgroundKindToSRGB() {
+    let color = WorktreeTerminalManager.osc11BackgroundColor(
+      kind: GHOSTTY_ACTION_COLOR_KIND_BACKGROUND,
+      red: 26,
+      green: 42,
+      blue: 58
+    )
+    let srgb = color?.usingColorSpace(.sRGB)
+    #expect(srgb != nil)
+    #expect(abs((srgb?.redComponent ?? 0) - CGFloat(26) / 255) < 0.001)
+    #expect(abs((srgb?.greenComponent ?? 0) - CGFloat(42) / 255) < 0.001)
+    #expect(abs((srgb?.blueComponent ?? 0) - CGFloat(58) / 255) < 0.001)
+  }
+
+  @Test func osc11BackgroundColorIgnoresNonBackgroundKinds() {
+    #expect(
+      WorktreeTerminalManager.osc11BackgroundColor(
+        kind: GHOSTTY_ACTION_COLOR_KIND_FOREGROUND, red: 1, green: 2, blue: 3) == nil)
+    #expect(
+      WorktreeTerminalManager.osc11BackgroundColor(
+        kind: GHOSTTY_ACTION_COLOR_KIND_CURSOR, red: 1, green: 2, blue: 3) == nil)
+    #expect(
+      WorktreeTerminalManager.osc11BackgroundColor(kind: nil, red: 1, green: 2, blue: 3) == nil)
+  }
+
+  @Test func osc11BackgroundColorRequiresAllComponents() {
+    #expect(
+      WorktreeTerminalManager.osc11BackgroundColor(
+        kind: GHOSTTY_ACTION_COLOR_KIND_BACKGROUND, red: nil, green: 2, blue: 3) == nil)
+    #expect(
+      WorktreeTerminalManager.osc11BackgroundColor(
+        kind: GHOSTTY_ACTION_COLOR_KIND_BACKGROUND, red: 1, green: nil, blue: 3) == nil)
+    #expect(
+      WorktreeTerminalManager.osc11BackgroundColor(
+        kind: GHOSTTY_ACTION_COLOR_KIND_BACKGROUND, red: 1, green: 2, blue: nil) == nil)
+  }
+
+  @Test func focusedSurfaceBackgroundInitializesToThemeFallback() {
+    let runtime = GhosttyRuntime()
+    let manager = WorktreeTerminalManager(runtime: runtime)
+    #expect(manager.focusedSurfaceBackground.matchesTint(runtime.backgroundColor()))
+  }
+
+  @Test func refreshFocusedSurfaceBackgroundDedupesUnchangedColor() {
+    let manager = WorktreeTerminalManager(runtime: GhosttyRuntime())
+    let notificationCount = LockIsolated(0)
+    let observer = NotificationCenter.default.addObserver(
+      forName: .ghosttyFocusedSurfaceBackgroundDidChange,
+      object: manager,
+      queue: nil
+    ) { _ in
+      notificationCount.withValue { $0 += 1 }
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    // The resolved color (theme fallback, no focused surface) matches the
+    // stored value, so neither a manual refresh nor a selection change posts.
+    manager.refreshFocusedSurfaceBackground()
+    manager.handleCommand(.setSelectedWorktreeID(makeWorktree().id))
+
+    #expect(notificationCount.value == 0)
+    #expect(manager.selectedWorktreeID == makeWorktree().id)
+  }
+
+  @Test func switchingBetweenSelectionsDoesNotSpuriouslyPost() {
+    let manager = WorktreeTerminalManager(runtime: GhosttyRuntime())
+    let notificationCount = LockIsolated(0)
+    let observer = NotificationCenter.default.addObserver(
+      forName: .ghosttyFocusedSurfaceBackgroundDidChange,
+      object: manager,
+      queue: nil
+    ) { _ in
+      notificationCount.withValue { $0 += 1 }
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    let first = makeWorktree(id: "/tmp/repo/wt-a").id
+    let second = makeWorktree(id: "/tmp/repo/wt-b").id
+    manager.handleCommand(.setSelectedWorktreeID(first))
+    manager.handleCommand(.setSelectedWorktreeID(second))
+    manager.handleCommand(.setSelectedWorktreeID(first))
+
+    #expect(notificationCount.value == 0)
+    #expect(manager.selectedWorktreeID == first)
   }
 }
