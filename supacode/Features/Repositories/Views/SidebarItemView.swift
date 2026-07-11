@@ -26,9 +26,9 @@ struct SidebarItemView: View {
   let hideSubtitle: Bool
   let hideSubtitleOnMatch: Bool
   let showsPullRequestInfo: Bool
-  /// Mirror of `@Shared(.sidebarShowsSessionTitles)`: title shows the selected
-  /// tab's title (branch moves to the subtitle) and multi-tab rows grow an
-  /// expander. Git worktree rows only; folders keep the legacy layout.
+  /// Mirror of `@Shared(.sidebarShowsSessionTitles)`: multi-tab worktree rows
+  /// grow an expander (count + chevron, row-body click) revealing per-tab
+  /// sub-rows. The row title itself always stays the project name.
   let showsSessionTitles: Bool
   let shortcutHint: String?
   /// Trailing branch-component label injected by the branch-nesting renderer so
@@ -45,15 +45,16 @@ struct SidebarItemView: View {
     let resolved = ResolvedRowDisplay(
       kind: store.kind,
       branchName: displayNameOverride ?? store.branchName,
-      worktreeName: store.sidebarDisplayName,
+      // Main worktrees have no `sidebarDisplayName` (nil by design); their
+      // "project name" is the repo folder itself.
+      worktreeName: store.sidebarDisplayName ?? store.workingDirectory.lastPathComponent,
       isMainWorktree: store.isMainWorktree,
       isPinned: store.isPinned,
       hideSubtitle: hideSubtitle,
       hideSubtitleOnMatch: hideSubtitleOnMatch,
       highlightSubtitle: highlightSubtitle,
       customTitle: store.customTitle,
-      customTint: store.customTint,
-      sessionTitle: showsSessionTitles && store.kind == .gitWorktree ? store.selectedTabTitle : nil
+      customTint: store.customTint
     )
 
     Label {
@@ -62,7 +63,6 @@ struct SidebarItemView: View {
           TitleView(
             name: resolved.name,
             subtitle: resolved.subtitle,
-            accent: resolved.accent,
             customTint: store.customTint,
             isLifecycleBusy: store.lifecycle.isBusy,
             isTaskRunning: store.isTaskRunning
@@ -137,8 +137,7 @@ struct ResolvedRowDisplay: Equatable {
     hideSubtitleOnMatch: Bool,
     highlightSubtitle: SidebarHighlightRepoTag? = nil,
     customTitle: String? = nil,
-    customTint: RepositoryColor? = nil,
-    sessionTitle: String? = nil
+    customTint: RepositoryColor? = nil
   ) {
     self.accent =
       if isMainWorktree { .main } else if isPinned { .pinned } else { .default }
@@ -155,46 +154,42 @@ struct ResolvedRowDisplay: Equatable {
       return
     }
 
-    let resolvedWorktreeName = worktreeName ?? "Default"
+    // The title is the worktree's folder name (the "project"); the branch
+    // rides the subtitle. A nil/empty folder name degenerates to the branch
+    // so the title never goes blank.
+    let resolvedWorktreeName = worktreeName ?? branchName
     let effectiveWorktreeName = resolvedWorktreeName.isEmpty ? branchName : resolvedWorktreeName
-    self.name = resolvedCustom ?? sessionTitle ?? branchName
+    self.name = resolvedCustom ?? effectiveWorktreeName
 
     let branchLastComponent = branchName.split(separator: "/").last.map(String.init) ?? branchName
     let isMatch = effectiveWorktreeName == branchLastComponent
     // Once a user types a custom title, they've lost the visual cue that the auto-derived name was
     // providing, so we always render the subtitle even when it would otherwise collapse on match.
-    // Session mode pins the branch into the subtitle (the title no longer carries
-    // it), so the hide-on-match collapse only applies to the legacy layout.
-    let shouldHideOnMatch = hideSubtitleOnMatch && !hasCustomTitle && isMatch && sessionTitle == nil
+    let shouldHideOnMatch = hideSubtitleOnMatch && !hasCustomTitle && isMatch
 
     if let highlightSubtitle {
-      let trail: String?
-      if sessionTitle != nil {
-        trail = branchName
-      } else if shouldHideOnMatch {
-        trail = nil
-      } else if isMainWorktree {
-        trail = "Default"
-      } else if let worktreeName, !worktreeName.isEmpty {
-        trail = worktreeName
+      let trail: String? = shouldHideOnMatch ? nil : branchName
+      // The repo tag is a disambiguator; when it's already the row title
+      // (a hoisted main worktree), echoing it in the subtitle reads as a
+      // duplicate — drop it and keep just the branch. Remote rows keep the
+      // full form so the host tag stays visible.
+      if highlightSubtitle.repoName == self.name, highlightSubtitle.hostInfo == nil {
+        self.subtitle = trail.map { .plain($0) } ?? .none
       } else {
-        trail = nil
+        self.subtitle = .highlight(
+          repo: highlightSubtitle.repoName,
+          repoColor: highlightSubtitle.repoColor,
+          trail: trail,
+          hostInfo: highlightSubtitle.hostInfo
+        )
       }
-      self.subtitle = .highlight(
-        repo: highlightSubtitle.repoName,
-        repoColor: highlightSubtitle.repoColor,
-        trail: trail,
-        hostInfo: highlightSubtitle.hostInfo
-      )
       return
     }
 
     if hideSubtitle || shouldHideOnMatch {
       self.subtitle = .none
-    } else if sessionTitle != nil {
-      self.subtitle = .plain(branchName)
     } else {
-      self.subtitle = .plain(effectiveWorktreeName)
+      self.subtitle = .plain(branchName)
     }
   }
 }
@@ -296,7 +291,6 @@ enum SidebarPullRequestIcon: Equatable {
 private struct TitleView: View, Equatable {
   let name: String
   let subtitle: ResolvedRowDisplay.Subtitle
-  let accent: WorktreeAccent
   /// User-supplied row tint. When set, paints the title; otherwise the title uses the default.
   let customTint: RepositoryColor?
   let isLifecycleBusy: Bool
@@ -307,7 +301,6 @@ private struct TitleView: View, Equatable {
   static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.name == rhs.name
       && lhs.subtitle == rhs.subtitle
-      && lhs.accent == rhs.accent
       && lhs.customTint == rhs.customTint
       && lhs.isLifecycleBusy == rhs.isLifecycleBusy
       && lhs.isTaskRunning == rhs.isTaskRunning
@@ -316,7 +309,8 @@ private struct TitleView: View, Equatable {
   var body: some View {
     let isBusy = isLifecycleBusy || isTaskRunning
     let isEmphasized = backgroundProminence == .increased
-    let accentStyle = accent.shapeStyle(emphasized: isEmphasized)
+    // The branch subtitle stays neutral; main/pinned accents no longer tint it.
+    let accentStyle: AnyShapeStyle = isEmphasized ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary)
     VStack(alignment: .leading, spacing: 0) {
       let titleText = Text(name)
         .font(.body)

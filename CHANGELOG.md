@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-07-11 侧边栏行标题改为项目名（worktree 文件夹名）
+- 行主标题不再显示分支名/会话标题：改为 worktree 文件夹名（主 worktree 即仓库文件夹名），自定义标题依旧最优先；会话标题只在展开的子行里显示
+- 副标题改为分支名，统一中性次要色（去掉 main 黄 / pinned 橙的 accent 染色）；高亮区副标题在仓库名与主标题重复时去掉仓库标签只留分支（远程行保留 host 完整形式）
+- 拆除第一轮"主标题跟随选中 tab 标题"整条链路（selectedTabTitle / sessionRowTitle / ResolvedRowDisplay.sessionTitle）及其测试；ResolvedRowDisplayTests 按新语义重写
+
 ## 2026-07-11 通知面板标题改为会话（tab）名
 - 通知落库时记录所属 tab（WorktreeTerminalNotification.tabID），通知 inspector 里 agent 通知的标题从统一的 "Claude Code" 改为该通知所在标签页的实时标题，Claude Code `/rename` 或手动改 tab 名后已有通知行会跟着更新
 - 实现：ToolbarNotificationWorktreeGroup 增加 tabTitles（只收录被通知引用的 tab，Equatable diff 对无关 tab 的标题风暴免疫）；tabsSnapshotChanged 的 cacheInvalidations 加 .toolbarNotificationGroups

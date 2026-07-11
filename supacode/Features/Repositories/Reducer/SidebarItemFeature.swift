@@ -251,16 +251,6 @@ extension SidebarItemFeature.State {
   var resolvedSidebarTitle: String? {
     SidebarDisplayName.resolved(custom: customTitle, fallback: sidebarDisplayName)
   }
-  /// Display title of the currently selected terminal tab, or nil when the
-  /// worktree has no live tab / the title is blank. Views layer this between
-  /// the user's custom title and the branch-name fallback.
-  var selectedTabTitle: String? {
-    guard let selectedID = tabsSummary.selectedTabID,
-      let tab = tabsSummary.tabs.first(where: { $0.id == selectedID })
-    else { return nil }
-    let trimmed = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
-  }
   var accent: WorktreeAccent { WorktreeAccent.derive(isMainWorktree: isMainWorktree, isPinned: isPinned) }
   /// True iff any tracked agent on this row is awaiting user input.
   /// Drives the Active section's classification ("agent awaiting input").

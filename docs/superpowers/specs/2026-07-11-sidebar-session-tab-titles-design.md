@@ -67,6 +67,15 @@
 - `selectWorktreeTab` action 单测。
 - 测试禁用 `Task.sleep`，用 `TestClock`。
 
+## 后续完善（2026-07-11 第三轮：回退主标题跟随，标题改为项目名）
+
+用户试用后确认的最终语义：
+
+- **行主标题 = worktree 文件夹名**（主 worktree 用仓库文件夹名；自定义标题最优先），任何时候都不跟随会话标题；会话标题只出现在展开的子行里。
+- **副标题 = 分支名**，中性次要色（不再吃 main 黄 / pinned 橙的 accent 染色）；文件夹名与分支尾段一致时按 hide-on-match 设置收起。
+- 高亮区（Pinned/Active）副标题 `仓库名 · 分支名` 在仓库名与主标题相同时去掉仓库标签只留分支；远程行保留完整形式（host 标签需要露出）。
+- 已拆除 `selectedTabTitle`/`sessionRowTitle` 与 `ResolvedRowDisplay.sessionTitle` 整条链路及其测试；`TitleView` 不再接收 accent；`sidebarShowsSessionTitles` 开关保留，现在只控制多 tab 行的展开器与子行。本文档前文中"主标题=选中 tab 标题、分支名移副标题"的设计已作废。
+
 ## 后续完善（2026-07-11 第二轮）
 
 1. **子行 agent 图标**：`AppFeature.agentSnapshotEffects` 在既有 per-row 扇出旁，用 `state.terminals.terminalTabs`（tab→surfaces 映射）把同一份 presence 快照按 tab 重分组，经新 action `tabAgentsChanged([TerminalTabID: [AgentInstance]])` 存进 `SidebarItemFeature.State.tabAgents`（`cacheInvalidations = []`）。子行左侧图标：该 tab 有 agent 时渲染 `AgentAvatarGroupView`（size 14, maxVisible 2），否则保留默认 tab 图标。展开时父行的聚合 agent 徽章隐藏（视觉上"移入"子行），折叠即恢复。
