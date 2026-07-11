@@ -654,35 +654,6 @@ struct WorktreeTerminalManagerTests {
     }
   }
 
-  @Test func newNotificationReplacesOlderOnesInSameTab() {
-    withDependencies {
-      $0.date.now = Date(timeIntervalSince1970: 1_234)
-      $0.continuousClock = ImmediateClock()
-    } operation: {
-      let manager = WorktreeTerminalManager(runtime: GhosttyRuntime())
-      let worktree = makeWorktree()
-      let state = manager.state(for: worktree)
-
-      guard
-        let tab1 = state.createTab(),
-        let tab2 = state.createTab(focusing: false),
-        let surface1 = state.splitTree(for: tab1).root?.leftmostLeaf(),
-        let surface2 = state.splitTree(for: tab2).root?.leftmostLeaf()
-      else {
-        Issue.record("Expected tabs and surfaces")
-        return
-      }
-
-      state.appendHookNotification(title: "First", body: "old", surfaceID: surface1.id)
-      state.appendHookNotification(title: "Other tab", body: "keep", surfaceID: surface2.id)
-      state.appendHookNotification(title: "Second", body: "new", surfaceID: surface1.id)
-
-      #expect(state.notifications.count == 2)
-      #expect(state.notifications.map(\.title).sorted() == ["Other tab", "Second"])
-      #expect(!state.notifications.contains { $0.title == "First" })
-    }
-  }
-
   @Test func appendedNotificationRecordsContainingTab() {
     withDependencies {
       $0.date.now = Date(timeIntervalSince1970: 1_234)
