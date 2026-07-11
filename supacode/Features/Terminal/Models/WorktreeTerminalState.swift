@@ -2144,6 +2144,7 @@ final class WorktreeTerminalState {
     guard !(trimmedTitle.isEmpty && trimmedBody.isEmpty) else { return }
     let isViewed = isViewedSurface(surfaceID)
     if notificationsEnabled {
+      removeNotifications(inTabContaining: surfaceID)
       notifications.insert(
         WorktreeTerminalNotification(
           surfaceID: surfaceID,
@@ -2161,6 +2162,21 @@ final class WorktreeTerminalState {
       emitNotificationStateChanged()
     }
     onNotificationReceived?(surfaceID, trimmedTitle, trimmedBody, isViewed)
+  }
+
+  /// One notification per tab: a new notification replaces any older ones from
+  /// surfaces in the same tab (or the same surface only, when it belongs to no tab).
+  private func removeNotifications(inTabContaining surfaceID: UUID) {
+    var tabSurfaceIDs: Set<UUID> = [surfaceID]
+    if let tabId = tabID(containing: surfaceID), let tree = trees[tabId] {
+      tabSurfaceIDs.formUnion(tree.leaves().map(\.id))
+    }
+    let removedSurfaceIDs = Set(notifications.map(\.surfaceID)).intersection(tabSurfaceIDs)
+    guard !removedSurfaceIDs.isEmpty else { return }
+    notifications.removeAll { tabSurfaceIDs.contains($0.surfaceID) }
+    for removed in removedSurfaceIDs where removed != surfaceID {
+      refreshSurfaceUnseenFlag(removed)
+    }
   }
 
   /// Detaches one surface from the local bookkeeping. The zmx session is NOT
