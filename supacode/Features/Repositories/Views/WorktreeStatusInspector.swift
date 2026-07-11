@@ -556,6 +556,7 @@ private struct NotificationRow: View {
             Text(Self.markdown(notification.body))
               .font(.callout)
               .foregroundStyle(notification.isRead ? Color.secondary : Color.primary)
+              .lineLimit(3)
               .fixedSize(horizontal: false, vertical: true)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
@@ -565,7 +566,9 @@ private struct NotificationRow: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .buttonStyle(.plain)
-    .help("Select worktree and focus terminal.")
+    // Body is clamped to three lines; surface the full text on hover, matching
+    // the sidebar bell popover. Fall back to the action hint for body-less rows.
+    .help(notification.body.isEmpty ? "Select worktree and focus terminal." : notification.content)
   }
 
   private static func markdown(_ string: String) -> AttributedString {
