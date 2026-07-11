@@ -497,11 +497,20 @@ private struct SidebarTabSubRow: View {
           .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         Spacer(minLength: 0)
       }
+      .padding(.horizontal, 6)
+      .padding(.vertical, 3)
       .contentShape(.interaction, .rect)
+      // Neutral gray selection pill (the unemphasized system selection color),
+      // deliberately not the accent-colored emphasized one: the parent row
+      // already carries the sidebar's accent highlight.
+      .background(isSelected ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : .clear)
+      .clipShape(.rect(cornerRadius: 5))
     }
     .buttonStyle(.plain)
-    .listRowInsets(.leading, CGFloat(nestDepth) * SidebarNestLayout.indentStep + 22)
-    .listRowInsets(.vertical, 4)
+    // The horizontal padding above eats into the old 22pt indent so the icon
+    // stays aligned; the highlight pill extends 6pt past it on the left.
+    .listRowInsets(.leading, CGFloat(nestDepth) * SidebarNestLayout.indentStep + 16)
+    .listRowInsets(.vertical, 2)
     .moveDisabled(true)
     .help("Switch to \(tab.title)")
     .accessibilityLabel("Session tab \(tab.title)\(isSelected ? ", selected" : "")")
