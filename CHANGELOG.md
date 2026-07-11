@@ -11,6 +11,9 @@
 - 兜底：tab 已关/标题空白回退 agent 显示名；tab 标题是裸进程名 "claude" 时映射回 "Claude Code"；非 agent 通知保留原始标题
 - 新增 4 个测试（分组解析 / 无关标题变更不改分组 / 缓存失效映射 / 落库记 tabID）；此改动并入 #630 通知面板 PR 范围（提 PR 时从 upstream/main 切分支 cherry-pick，勿带 CHANGELOG）
 
+## 2026-07-11 侧边栏子行选中加灰色背景高亮
+- 展开的会话子行里，当前选中 tab 除加粗外增加圆角灰色背景（系统 unemphasizedSelectedContentBackgroundColor，非 accent 色——父行已有 accent 选中高亮），一眼可见当前所在子标签页
+
 ## 2026-07-11 侧边栏会话子行完善（agent 图标 + 整行点击展开）
 - agent 出勤扇出按 tab 重分组（AppFeature.agentSnapshotEffects → 新 action tabAgentsChanged → SidebarItemFeature.State.tabAgents），展开的子行左侧图标换成该 tab 内运行 agent 的徽章（AgentAvatarGroupView，等待输入反色保留），无 agent 的 tab 保持默认图标；展开时父行聚合 agent 徽章隐藏，收起恢复
 - 行标题区（不含行尾控件）加 simultaneousGesture 点击切换子行展开/收起，⌘/⇧ 多选点击跳过，chevron 按钮保留为显式控件
