@@ -18,6 +18,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
   case runScript, stopRunScript
   case jumpToLatestUnread
   case togglePullRequestInspector, toggleNotificationsInspector
+  case toggleHistoryInspector
 
   // Stable string key for JSON dictionary persistence.
   public var codingKey: CodingKey {
@@ -70,6 +71,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     case .jumpToLatestUnread: "jumpToLatestUnread"
     case .togglePullRequestInspector: "togglePullRequestInspector"
     case .toggleNotificationsInspector: "toggleNotificationsInspector"
+    case .toggleHistoryInspector: "toggleHistoryInspector"
     }
   }
 
@@ -105,6 +107,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     "jumpToLatestUnread": .jumpToLatestUnread,
     "togglePullRequestInspector": .togglePullRequestInspector,
     "toggleNotificationsInspector": .toggleNotificationsInspector,
+    "toggleHistoryInspector": .toggleHistoryInspector,
   ]
 
   private init?(stableKey: String) {
@@ -159,6 +162,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     case .jumpToLatestUnread: "Jump to Latest Unread"
     case .togglePullRequestInspector: "Toggle Pull Request Inspector"
     case .toggleNotificationsInspector: "Toggle Notifications Inspector"
+    case .toggleHistoryInspector: "Toggle History Inspector"
     }
   }
 }
@@ -408,6 +412,9 @@ public enum AppShortcuts {
   public static let toggleNotificationsInspector = AppShortcut(
     id: .toggleNotificationsInspector, key: "n", modifiers: [.command, .option]
   )
+  public static let toggleHistoryInspector = AppShortcut(
+    id: .toggleHistoryInspector, key: "l", modifiers: [.command, .option]
+  )
 
   public static let worktreeSelection: [AppShortcut] = [
     selectWorktree1, selectWorktree2, selectWorktree3, selectWorktree4, selectWorktree5,
@@ -465,7 +472,7 @@ public enum AppShortcuts {
       shortcuts: [
         openWorktree, revealInFinder, openRepository, addRemoteRepository, cloneRepository,
         openPullRequest, copyPath, runScript, stopRunScript, jumpToLatestUnread,
-        togglePullRequestInspector, toggleNotificationsInspector,
+        togglePullRequestInspector, toggleNotificationsInspector, toggleHistoryInspector,
       ]
     ),
   ]

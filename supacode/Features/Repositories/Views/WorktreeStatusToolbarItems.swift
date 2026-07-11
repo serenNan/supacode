@@ -140,3 +140,32 @@ struct WorktreeNotificationsToolbarButton: View {
     return controlActiveState == .key ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)
   }
 }
+
+/// Trailing toolbar toggle for the commit-history inspector pane.
+struct WorktreeGitHistoryToolbarButton: View {
+  let isSelected: Bool
+  // Selection highlight color, derived from the terminal background luminance
+  // so the lit state tracks the chrome instead of the system accent.
+  let tint: Color
+  // Concrete chrome foreground (white on dark, black on light) so the glyph
+  // doesn't change color when the toggle is selected.
+  let foreground: Color
+  let onActivate: () -> Void
+
+  var body: some View {
+    let shortcut = WorktreeDetailView.resolveShortcutDisplay(for: AppShortcuts.toggleHistoryInspector)
+    Toggle(isOn: Binding(get: { isSelected }, set: { _ in onActivate() })) {
+      if isSelected {
+        Label("History", systemImage: "clock.arrow.circlepath")
+          .foregroundStyle(foreground)
+      } else {
+        // No foreground so the resting glyph matches the other toolbar buttons
+        // exactly, including the fade when the window isn't key.
+        Label("History", systemImage: "clock.arrow.circlepath")
+      }
+    }
+    .tint(tint)
+    .help("Toggle History Inspector (\(shortcut))")
+    .accessibilityLabel("Commit history")
+  }
+}

@@ -80,6 +80,7 @@ nonisolated struct WorktreeCreationProgressUpdateThrottle {
 enum WorktreeInspectorPane: Hashable, Sendable {
   case git
   case notifications
+  case history
 }
 
 @Reducer
@@ -138,6 +139,9 @@ struct RepositoriesFeature {
     // leave the column empty when dragged back open.
     var inspectorPresented = false
     var inspectorPane: WorktreeInspectorPane = .git
+    /// Commit history for the currently selected worktree; populated only while
+    /// the history pane is visible (see `gitHistoryReducer`).
+    var gitHistory: GitHistoryState?
     var githubIntegrationAvailability: GithubIntegrationAvailability = .unknown
     var pendingPullRequestRefreshByRepositoryID: [Repository.ID: PendingPullRequestRefresh] = [:]
     var inFlightPullRequestRefreshRepositoryIDs: Set<Repository.ID> = []
@@ -463,6 +467,7 @@ struct RepositoriesFeature {
     case dismissToast
     case toggleInspectorPane(WorktreeInspectorPane)
     case setInspectorPresented(Bool)
+    case gitHistory(GitHistoryAction)
     case delayedPullRequestRefresh(Worktree.ID)
     case openRepositorySettings(Repository.ID)
     case requestCustomizeRepository(Repository.ID)
@@ -3960,6 +3965,11 @@ struct RepositoriesFeature {
         // under the type-checker's complexity limit.
         return .none
 
+      case .gitHistory:
+        // Real handling lives in `gitHistoryReducer` (combined below) to keep `body`
+        // under the type-checker's complexity limit.
+        return .none
+
       case .refreshGithubIntegrationAvailability, .githubIntegrationAvailabilityUpdated,
         .repositoryPullRequestRefreshCompleted, .worktreeBranchNameLoaded, .worktreeLineChangesLoaded,
         .repositoryPullRequestsLoaded, .pullRequestAction, .setGithubIntegrationEnabled, .setMergedWorktreeAction,
@@ -4145,6 +4155,9 @@ struct RepositoriesFeature {
     worktreeCreateInRepoReducer
     worktreeNotificationReducer
     githubIntegrationReducer
+    // After the inspector / selection mutations above so its reconciliation
+    // arm observes post-reduce visibility state.
+    gitHistoryReducer
     // Targeted post-reduce hook: only the actions that demonstrably touch
     // structure inputs trigger a recompute. The Equatable diff inside the
     // helper suppresses no-op rebuilds at the SwiftUI layer. Gated on

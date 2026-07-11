@@ -756,6 +756,12 @@ struct WorktreeDetailView: View {
           foreground: chromeForeground,
           onActivate: { onActivateInspector(.notifications) }
         )
+        WorktreeGitHistoryToolbarButton(
+          isSelected: inspectorPresented && inspectorPane == .history,
+          tint: chromeTint,
+          foreground: chromeForeground,
+          onActivate: { onActivateInspector(.history) }
+        )
       }
     }
   }
