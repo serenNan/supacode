@@ -1,4 +1,3 @@
-import AppKit
 import ComposableArchitecture
 import SupacodeSettingsShared
 import SwiftUI
@@ -27,8 +26,9 @@ struct SidebarItemView: View {
   let hideSubtitleOnMatch: Bool
   let showsPullRequestInfo: Bool
   /// Mirror of `@Shared(.sidebarShowsSessionTitles)`: multi-tab worktree rows
-  /// grow an expander (count + chevron, row-body click) revealing per-tab
-  /// sub-rows. The row title itself always stays the project name.
+  /// grow a trailing expander (count + chevron) revealing per-tab sub-rows.
+  /// The row body stays gesture-free so the List row selects on click
+  /// anywhere; the row title itself always stays the project name.
   let showsSessionTitles: Bool
   let shortcutHint: String?
   /// Trailing branch-component label injected by the branch-nesting renderer so
@@ -59,23 +59,15 @@ struct SidebarItemView: View {
 
     Label {
       HStack(spacing: 8) {
-        HStack(spacing: 0) {
-          TitleView(
-            name: resolved.name,
-            subtitle: resolved.subtitle,
-            customTint: store.customTint,
-            isLifecycleBusy: store.lifecycle.isBusy,
-            isTaskRunning: store.isTaskRunning
-          )
-          .equatable()
-          Spacer(minLength: 0)
-        }
-        .contentShape(.interaction, .rect)
-        .accessibilityAddTraits(.isButton)
-        // Simultaneous so the List row still selects on the same click; the
-        // trailing controls (bell, expander) sit outside this area so their
-        // clicks don't double-toggle.
-        .simultaneousGesture(TapGesture().onEnded { toggleTabListFromRowClick() })
+        TitleView(
+          name: resolved.name,
+          subtitle: resolved.subtitle,
+          customTint: store.customTint,
+          isLifecycleBusy: store.lifecycle.isBusy,
+          isTaskRunning: store.isTaskRunning
+        )
+        .equatable()
+        Spacer(minLength: 0)
         TrailingView(
           store: store,
           shortcutHint: shortcutHint,
@@ -98,17 +90,6 @@ struct SidebarItemView: View {
     .listRowInsets(.leading, CGFloat(nestDepth) * SidebarNestLayout.indentStep)
     .listRowInsets(.trailing, 4)
     .listRowInsets(.vertical, 6)
-  }
-
-  /// Row-body click on a multi-tab worktree toggles the per-tab sub-rows, so
-  /// the whole title area works as the expander (the trailing chevron stays as
-  /// the explicit control). ⌘/⇧ clicks are selection gestures and skip it.
-  private func toggleTabListFromRowClick() {
-    guard showsSessionTitles, store.kind == .gitWorktree,
-      store.tabsSummary.tabs.count > 1,
-      NSEvent.modifierFlags.isDisjoint(with: [.command, .shift])
-    else { return }
-    store.send(.tabListExpansionToggled)
   }
 }
 
