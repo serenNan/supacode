@@ -1,5 +1,9 @@
 # 变更日志
 
+## 2026-07-11 回合上游三个修复 PR + 测试 locale 修正
+- cherry-pick 上游未合并的 bug 修复 PR（作者 jeremybower）：#639 tuist 重新生成只清本 worktree 的 DerivedData（挪到仓库内 `.build/DerivedData`，根治并行 worktree 构建互删）、#638 coalescesBurstOfProgressReports 改 advance-until-settled 循环去 flaky、#632 merge queue ETA 测试适配 macOS 26.5
+- 在 #632 之上追加 fork 修正：surfacesPositionAndEstimatedTime 的分钟拼写既随 OS 版本也随 locale/地区变（作者 en_CA 26.5 出 "mins"，本机同版本出 "min"），版本判断修不干净；改为按同文件 formatsMultiUnitEstimate 先例断言形状+组合、不断言拼写。此测试在本机一直挂的根因即此（对应记忆里"date 依赖测试待修"）
+
 ## 2026-07-11 侧边栏行标题改为项目名（worktree 文件夹名）
 - 行主标题不再显示分支名/会话标题：改为 worktree 文件夹名（主 worktree 即仓库文件夹名），自定义标题依旧最优先；会话标题只在展开的子行里显示
 - 副标题改为分支名，统一中性次要色（去掉 main 黄 / pinned 橙的 accent 染色）；高亮区副标题在仓库名与主标题重复时去掉仓库标签只留分支（远程行保留 host 完整形式）
