@@ -25,6 +25,7 @@ enum GitOperation: String {
   case lineChanges = "line_changes"
   case commitLog = "commit_log"
   case commitDetail = "commit_detail"
+  case fileDiff = "file_diff"
   case upstreamRef = "upstream_ref"
   case aheadCount = "ahead_count"
   case workTreeProbe = "work_tree_probe"
@@ -998,6 +999,32 @@ struct GitClient {
       arguments: ["-C", path, "diff", "HEAD", "--numstat"]
     )
     return Self.parseNumstat(output)
+  }
+
+  /// Unified diff of one uncommitted file vs HEAD. Untracked files yield an
+  /// empty diff, matching the numstat-based file list.
+  nonisolated func uncommittedFileDiff(at worktreeURL: URL, path filePath: String) async throws
+    -> GitFileDiff
+  {
+    let path = worktreeURL.path(percentEncoded: false)
+    let output = try await runGit(
+      operation: .fileDiff,
+      arguments: ["-C", path, "diff", "HEAD", "--", filePath]
+    )
+    return Self.parseFileDiff(output)
+  }
+
+  /// Unified diff of one file in one commit. Empty `--format=` drops the commit
+  /// header so root commits (no parent to diff against) work like any other.
+  nonisolated func commitFileDiff(at worktreeURL: URL, hash: String, path filePath: String)
+    async throws -> GitFileDiff
+  {
+    let path = worktreeURL.path(percentEncoded: false)
+    let output = try await runGit(
+      operation: .fileDiff,
+      arguments: ["-C", path, "show", "--format=", "--patch", hash, "--", filePath]
+    )
+    return Self.parseFileDiff(output)
   }
 
   nonisolated private func isWorktreeIndexLocked(_ worktreeURL: URL) async -> Bool {

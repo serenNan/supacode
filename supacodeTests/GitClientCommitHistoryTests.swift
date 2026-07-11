@@ -355,3 +355,78 @@ struct GitClientCommitHistoryTests {
     #expect(diffCall?.contains("--numstat") == true)
   }
 }
+
+struct GitClientFileDiffTests {
+  private nonisolated static let diffOutput = """
+    diff --git a/supacode/App/A.swift b/supacode/App/A.swift
+    index 1234567..89abcde 100644
+    --- a/supacode/App/A.swift
+    +++ b/supacode/App/A.swift
+    @@ -1 +1 @@
+    -old
+    +new
+    """
+
+  private func client(recording store: CommitHistoryShellCallStore) -> GitClient {
+    GitClient(
+      shell: ShellClient(
+        run: { _, arguments, _ in
+          await store.record(arguments)
+          return ShellOutput(stdout: Self.diffOutput, stderr: "", exitCode: 0)
+        },
+        runLoginImpl: { _, _, _, _ in ShellOutput(stdout: "", stderr: "", exitCode: 0) }
+      )
+    )
+  }
+
+  @Test func uncommittedFileDiffRunsGitDiffHeadScopedToPath() async throws {
+    let store = CommitHistoryShellCallStore()
+
+    let diff = try await client(recording: store).uncommittedFileDiff(
+      at: URL(fileURLWithPath: "/tmp/repo"), path: "supacode/App/A.swift")
+
+    #expect(diff.hunks.count == 1)
+    #expect(diff.hunks.first?.lines.count == 2)
+    let call = await store.calls.first
+    #expect(call?.contains("diff") == true)
+    #expect(call?.contains("HEAD") == true)
+    #expect(call?.contains("--") == true)
+    #expect(call?.contains("supacode/App/A.swift") == true)
+  }
+
+  @Test func commitFileDiffRunsGitShowPatchScopedToPath() async throws {
+    let store = CommitHistoryShellCallStore()
+    let hash = String(repeating: "d", count: 40)
+
+    let diff = try await client(recording: store).commitFileDiff(
+      at: URL(fileURLWithPath: "/tmp/repo"), hash: hash, path: "supacode/App/A.swift")
+
+    #expect(diff.hunks.count == 1)
+    let call = await store.calls.first
+    #expect(call?.contains("show") == true)
+    #expect(call?.contains("--format=") == true)
+    #expect(call?.contains("--patch") == true)
+    #expect(call?.contains(hash) == true)
+    #expect(call?.contains("--") == true)
+    #expect(call?.contains("supacode/App/A.swift") == true)
+  }
+
+  @Test func fileDiffFailureThrows() async {
+    let shell = ShellClient(
+      run: { _, _, _ in
+        throw GitClientError.commandFailed(command: "git diff", message: "boom")
+      },
+      runLoginImpl: { _, _, _, _ in ShellOutput(stdout: "", stderr: "", exitCode: 0) }
+    )
+    let client = GitClient(shell: shell)
+
+    await #expect(throws: (any Error).self) {
+      _ = try await client.uncommittedFileDiff(
+        at: URL(fileURLWithPath: "/tmp/repo"), path: "A.swift")
+    }
+    await #expect(throws: (any Error).self) {
+      _ = try await client.commitFileDiff(
+        at: URL(fileURLWithPath: "/tmp/repo"), hash: "abc", path: "A.swift")
+    }
+  }
+}

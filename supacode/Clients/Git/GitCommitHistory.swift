@@ -50,6 +50,29 @@ nonisolated struct GitHistorySnapshot: Equatable, Sendable {
   let isTruncated: Bool
 }
 
+nonisolated struct GitDiffLine: Equatable, Sendable {
+  enum Kind: Equatable, Sendable {
+    case context
+    case added
+    case removed
+  }
+
+  let kind: Kind
+  let text: String
+  let oldNumber: Int?
+  let newNumber: Int?
+}
+
+nonisolated struct GitDiffHunk: Equatable, Sendable {
+  let header: String
+  let lines: [GitDiffLine]
+}
+
+nonisolated struct GitFileDiff: Equatable, Sendable {
+  let hunks: [GitDiffHunk]
+  let isBinary: Bool
+}
+
 // Pure parsers for the history queries. Records are separated by `%x1e` and
 // fields by `%x1f`: control characters can't occur in valid UTF-8 commit text,
 // so subjects/bodies with tabs, newlines, or emoji never break field splits.
@@ -118,6 +141,73 @@ extension GitClient {
           removed: Int(columns[1])
         )
       }
+  }
+
+  /// Unified diff for one file. Lines before the first `@@` are file headers
+  /// (`diff --git`, `index`, `---`/`+++`, rename markers) and are skipped; a
+  /// `Binary files … differ` marker there flags the whole diff binary.
+  nonisolated static func parseFileDiff(_ output: String) -> GitFileDiff {
+    var hunks: [GitDiffHunk] = []
+    var currentHeader: String?
+    var currentLines: [GitDiffLine] = []
+    var oldNumber = 0
+    var newNumber = 0
+    var isBinary = false
+
+    func flush() {
+      if let header = currentHeader {
+        hunks.append(GitDiffHunk(header: header, lines: currentLines))
+      }
+      currentHeader = nil
+      currentLines = []
+    }
+
+    for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+      if line.hasPrefix("@@") {
+        flush()
+        currentHeader = String(line)
+        (oldNumber, newNumber) = parseHunkStarts(line)
+        continue
+      }
+      guard currentHeader != nil else {
+        if line.hasPrefix("Binary files "), line.hasSuffix(" differ") {
+          isBinary = true
+        }
+        continue
+      }
+      if line.hasPrefix("diff --git") {
+        flush()
+      } else if line.hasPrefix("+") {
+        currentLines.append(
+          GitDiffLine(kind: .added, text: String(line.dropFirst()), oldNumber: nil, newNumber: newNumber))
+        newNumber += 1
+      } else if line.hasPrefix("-") {
+        currentLines.append(
+          GitDiffLine(kind: .removed, text: String(line.dropFirst()), oldNumber: oldNumber, newNumber: nil))
+        oldNumber += 1
+      } else if line.hasPrefix(" ") {
+        currentLines.append(
+          GitDiffLine(
+            kind: .context, text: String(line.dropFirst()), oldNumber: oldNumber, newNumber: newNumber))
+        oldNumber += 1
+        newNumber += 1
+      }
+      // "\ No newline at end of file" and blank trailing lines fall through.
+    }
+    flush()
+    return GitFileDiff(hunks: hunks, isBinary: isBinary)
+  }
+
+  /// `@@ -a[,b] +c[,d] @@ …` → (a, c); counts and trailing context optional.
+  private nonisolated static func parseHunkStarts(_ line: Substring) -> (Int, Int) {
+    let tokens = line.split(separator: " ")
+    guard tokens.count >= 3,
+      let old = Int(tokens[1].dropFirst().prefix(while: \.isNumber)),
+      let new = Int(tokens[2].dropFirst().prefix(while: \.isNumber))
+    else {
+      return (0, 0)
+    }
+    return (old, new)
   }
 
   /// `%D` under `--decorate=full`, e.g.
