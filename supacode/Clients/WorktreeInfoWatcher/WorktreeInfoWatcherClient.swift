@@ -16,6 +16,7 @@ struct WorktreeInfoWatcherClient {
     case branchChanged(worktreeID: Worktree.ID)
     case filesChanged(worktreeID: Worktree.ID)
     case repositoryPullRequestRefresh(repositoryRootURL: URL, worktreeIDs: [Worktree.ID])
+    case repositoryIssueRefresh(repositoryRootURL: URL)
   }
 }
 

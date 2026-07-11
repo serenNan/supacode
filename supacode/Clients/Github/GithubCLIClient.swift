@@ -188,6 +188,7 @@ struct GithubCLIClient: Sendable {
   var latestRun: @Sendable (URL, String) async throws -> GithubWorkflowRun?
   var resolveRemoteInfo: @Sendable (URL) async -> GithubRemoteInfo?
   var batchPullRequests: @Sendable (String, String, String, [String]) async throws -> [String: GithubPullRequest]
+  var listIssues: @Sendable (String, String, String) async throws -> [GithubIssue]
   var mergePullRequest: @Sendable (URL, GithubRemoteInfo?, Int, PullRequestMergeStrategy) async throws -> Void
   var closePullRequest: @Sendable (URL, GithubRemoteInfo?, Int) async throws -> Void
   var markPullRequestReady: @Sendable (URL, GithubRemoteInfo?, Int) async throws -> Void
@@ -211,6 +212,7 @@ extension GithubCLIClient: DependencyKey {
       latestRun: latestRunFetcher(shell: shell, resolver: resolver),
       resolveRemoteInfo: resolveRemoteInfoFetcher(shell: shell, resolver: resolver),
       batchPullRequests: batchPullRequestsFetcher(shell: shell, resolver: resolver),
+      listIssues: listIssuesFetcher(shell: shell, resolver: resolver),
       mergePullRequest: mergePullRequestFetcher(shell: shell, resolver: resolver),
       closePullRequest: closePullRequestFetcher(shell: shell, resolver: resolver),
       markPullRequestReady: markPullRequestReadyFetcher(shell: shell, resolver: resolver),
@@ -227,6 +229,7 @@ extension GithubCLIClient: DependencyKey {
     latestRun: { _, _ in nil },
     resolveRemoteInfo: { _ in nil },
     batchPullRequests: { _, _, _, _ in [:] },
+    listIssues: { _, _, _ in [] },
     mergePullRequest: { _, _, _, _ in },
     closePullRequest: { _, _, _ in },
     markPullRequestReady: { _, _, _ in },
@@ -797,6 +800,45 @@ nonisolated private func fetchPullRequestsChunk(
     repo: request.repo
   )
   return (chunkIndex, prsByBranch)
+}
+
+nonisolated private func listIssuesFetcher(
+  shell: ShellClient,
+  resolver: GithubCLIExecutableResolver
+) -> @Sendable (String, String, String) async throws -> [GithubIssue] {
+  { host, owner, repo in
+    @Dependency(\.continuousClock) var clock
+    let arguments = [
+      "api",
+      "graphql",
+      "--hostname",
+      host,
+      "-f",
+      "query=\(GithubIssuesQuery.query)",
+      "-f",
+      "owner=\(owner)",
+      "-f",
+      "repo=\(repo)",
+    ]
+    let output: String
+    do {
+      output = try await runGh(shell: shell, resolver: resolver, arguments: arguments, repoRoot: nil)
+    } catch GithubCLIError.gatewayTimeout {
+      // One retry covers the intermittent cold-start 504 before the next periodic refresh.
+      try await clock.sleep(for: batchPullRequestsGatewayRetryBackoff)
+      output = try await runGh(shell: shell, resolver: resolver, arguments: arguments, repoRoot: nil)
+    }
+    guard !output.isEmpty else {
+      return []
+    }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try GithubCLIOutput.decode(
+      GithubIssuesGraphQLResponse.self,
+      from: output,
+      decoder: decoder
+    ).issues
+  }
 }
 
 // GHES < 3.8 rejects the `mergeQueueEntry` selection with a "Field 'mergeQueueEntry' doesn't exist"

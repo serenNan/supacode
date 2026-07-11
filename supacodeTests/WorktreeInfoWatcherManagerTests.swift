@@ -245,6 +245,65 @@ struct WorktreeInfoWatcherManagerTests {
     try FileManager.default.removeItem(at: tempRepository.tempRoot)
   }
 
+  @Test func emitsIssueRefreshAlongsidePullRequestRefresh() async throws {
+    let clock = TestClock()
+    let tempRepository = try makeTempRepository(worktreeNames: ["sparrow"])
+    let manager = WorktreeInfoWatcherManager(
+      focusedInterval: .milliseconds(80),
+      unfocusedInterval: .milliseconds(80),
+      clock: clock
+    )
+    let (collector, task) = startCollecting(manager.eventStream())
+
+    manager.handleCommand(.setWorktrees(tempRepository.worktrees))
+    await drainAsyncEvents()
+    #expect(await collector.issueRefreshCount(repositoryRootURL: tempRepository.tempRoot) == 1)
+
+    await clock.advance(by: .milliseconds(80))
+    await drainAsyncEvents()
+    #expect(await collector.issueRefreshCount(repositoryRootURL: tempRepository.tempRoot) == 2)
+    #expect(await collector.pullRequestRefreshCount(repositoryRootURL: tempRepository.tempRoot) == 2)
+
+    manager.handleCommand(.stop)
+    await task.value
+    try FileManager.default.removeItem(at: tempRepository.tempRoot)
+  }
+
+  @Test func stopsIssueRefreshWhenTrackingDisabledOrRepositoryRemoved() async throws {
+    let clock = TestClock()
+    let tempRepository = try makeTempRepository(worktreeNames: ["sparrow"])
+    let manager = WorktreeInfoWatcherManager(
+      focusedInterval: .milliseconds(80),
+      unfocusedInterval: .milliseconds(80),
+      clock: clock
+    )
+    let (collector, task) = startCollecting(manager.eventStream())
+
+    manager.handleCommand(.setWorktrees(tempRepository.worktrees))
+    await drainAsyncEvents()
+    let baseline = await collector.issueRefreshCount(repositoryRootURL: tempRepository.tempRoot)
+    #expect(baseline == 1)
+
+    manager.handleCommand(.setPullRequestTrackingEnabled(false))
+    await clock.advance(by: .milliseconds(160))
+    await drainAsyncEvents()
+    #expect(await collector.issueRefreshCount(repositoryRootURL: tempRepository.tempRoot) == baseline)
+
+    manager.handleCommand(.setPullRequestTrackingEnabled(true))
+    await drainAsyncEvents()
+    let afterReenable = await collector.issueRefreshCount(repositoryRootURL: tempRepository.tempRoot)
+    #expect(afterReenable == baseline + 1)
+
+    manager.handleCommand(.setWorktrees([]))
+    await clock.advance(by: .milliseconds(160))
+    await drainAsyncEvents()
+    #expect(await collector.issueRefreshCount(repositoryRootURL: tempRepository.tempRoot) == afterReenable)
+
+    manager.handleCommand(.stop)
+    await task.value
+    try FileManager.default.removeItem(at: tempRepository.tempRoot)
+  }
+
   @Test func capsTheEventBufferUnderBackpressure() async throws {
     let tempWorktree = try makeTempWorktree()
     let manager = WorktreeInfoWatcherManager()
@@ -295,6 +354,14 @@ actor EventCollector {
   func pullRequestRefreshCount(repositoryRootURL: URL) -> Int {
     events.reduce(into: 0) { result, event in
       if case .repositoryPullRequestRefresh(let rootURL, _) = event, rootURL == repositoryRootURL {
+        result += 1
+      }
+    }
+  }
+
+  func issueRefreshCount(repositoryRootURL: URL) -> Int {
+    events.reduce(into: 0) { result, event in
+      if case .repositoryIssueRefresh(let rootURL) = event, rootURL == repositoryRootURL {
         result += 1
       }
     }

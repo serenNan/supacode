@@ -439,6 +439,14 @@ extension RepositoriesFeature.Action {
       .repositoryPullRequestsLoaded:
       return [.sidebarStructure, .selectedWorktreeSlice]
 
+    // Issue loads append repo-level notifications rendered by the toolbar
+    // bell; the sidebar rows never show issue data, so structure/slice stay.
+    case .repositoryIssuesLoaded, .issueNotificationSelected, .dismissAllIssueNotifications:
+      return .toolbarNotificationGroups
+    // In-flight bookkeeping only.
+    case .repositoryIssueRefreshCompleted:
+      return []
+
     // Selection changes only refresh the slice.
     case .selectionChanged, .selectWorktree, .selectArchivedWorktrees,
       .selectNextWorktree, .selectPreviousWorktree, .selectWorktreeAtHotkeySlot,

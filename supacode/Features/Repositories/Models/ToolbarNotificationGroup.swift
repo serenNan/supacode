@@ -10,11 +10,20 @@ struct ToolbarNotificationRepositoryGroup: Identifiable, Equatable {
   let color: RepositoryColor?
   let isFolder: Bool
   let worktrees: [ToolbarNotificationWorktreeGroup]
+  /// Repo-scoped GitHub issue updates; issues have no owning worktree, so they
+  /// sit beside the worktree groups rather than inside one.
+  let issueNotifications: [RepositoryIssueNotification]
 
   var notificationCount: Int {
     worktrees.reduce(0) { count, worktree in
       count + worktree.notifications.count
-    }
+    } + issueNotifications.count
+  }
+
+  var unreadCount: Int {
+    worktrees.reduce(0) { count, worktree in
+      count + worktree.notifications.count { !$0.isRead }
+    } + issueNotifications.count { !$0.isRead }
   }
 
   var unseenWorktreeCount: Int {
@@ -68,7 +77,8 @@ extension RepositoriesFeature.State {
           )
         }
 
-      if !worktreeGroups.isEmpty {
+      let issueNotifications = issueNotifications.filter { $0.repositoryID == repositoryID }
+      if !worktreeGroups.isEmpty || !issueNotifications.isEmpty {
         let isFolder = !repository.isGitRepository
         // A folder's title / tint live on its synthetic row, not the repo
         // section; resolve there so a customized folder header matches the sidebar.
@@ -82,7 +92,8 @@ extension RepositoriesFeature.State {
               : Repository.sidebarDisplayName(custom: section?.title, fallback: repository.name),
             color: isFolder ? folderRow?.customTint : section?.color,
             isFolder: isFolder,
-            worktrees: worktreeGroups
+            worktrees: worktreeGroups,
+            issueNotifications: Array(issueNotifications)
           )
         )
       }

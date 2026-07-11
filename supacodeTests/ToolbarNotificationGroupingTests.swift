@@ -288,6 +288,33 @@ struct ToolbarNotificationGroupingTests {
     #expect(groups.first?.unseenWorktreeCount == 1)
   }
 
+  @Test func includesRepoLevelIssueNotificationsWithoutWorktreeNotifications() {
+    let repoPath = "/tmp/repo-a"
+    let main = makeWorktree(id: repoPath, name: "main", repoRoot: repoPath)
+    let repo = makeRepository(id: repoPath, name: "Repo A", worktrees: [main])
+    var state = RepositoriesFeature.State(reconciledRepositories: [repo])
+    state.repositoryRoots = [repo.rootURL]
+    state.issueNotifications = [
+      RepositoryIssueNotification(
+        id: UUID(),
+        repositoryID: repo.id,
+        issueNumber: 630,
+        title: "New comment on #630",
+        body: "Clamp notification body",
+        url: "https://github.com/octo/repo/issues/630",
+        createdAt: .distantPast
+      )
+    ]
+
+    let groups = state.computeToolbarNotificationGroups()
+
+    #expect(groups.map(\.id) == [repo.id])
+    #expect(groups.first?.worktrees.isEmpty == true)
+    #expect(groups.first?.issueNotifications.count == 1)
+    #expect(groups.first?.notificationCount == 1)
+    #expect(groups.first?.unreadCount == 1)
+  }
+
   private func setRowNotifications(
     _ state: inout RepositoriesFeature.State,
     id: SidebarItemID,
