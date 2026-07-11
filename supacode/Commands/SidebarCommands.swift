@@ -77,6 +77,7 @@ struct SidebarCommands: Commands {
     let collapseAll = AppShortcuts.collapseAllSidebarGroups.effective(from: overrides)
     let togglePullRequestInspector = AppShortcuts.togglePullRequestInspector.effective(from: overrides)
     let toggleNotificationsInspector = AppShortcuts.toggleNotificationsInspector.effective(from: overrides)
+    let toggleHistoryInspector = AppShortcuts.toggleHistoryInspector.effective(from: overrides)
     CommandGroup(replacing: .sidebar) {
       Button("Toggle Left Sidebar", systemImage: "sidebar.leading") {
         toggleLeftSidebarAction?()
@@ -116,6 +117,12 @@ struct SidebarCommands: Commands {
         }
         .appKeyboardShortcut(toggleNotificationsInspector)
         .help("Toggle Notifications Inspector (\(toggleNotificationsInspector?.display ?? "none"))")
+        .disabled(toggleInspectorPaneAction?.isEnabled != true)
+        Button("Toggle History Inspector", systemImage: "clock.arrow.circlepath") {
+          toggleInspectorPaneAction?(.history)
+        }
+        .appKeyboardShortcut(toggleHistoryInspector)
+        .help("Toggle History Inspector (\(toggleHistoryInspector?.display ?? "none"))")
         .disabled(toggleInspectorPaneAction?.isEnabled != true)
       }
       Section {

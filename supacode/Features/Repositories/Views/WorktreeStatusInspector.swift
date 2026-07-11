@@ -30,6 +30,11 @@ struct WorktreeStatusInspectorContainer: View {
           terminalManager: terminalManager,
           onSelectNotification: onSelectNotification
         )
+      case .history:
+        WorktreeGitHistoryInspectorView(
+          repositoriesStore: repositoriesStore,
+          isFolder: isFolder
+        )
       }
     }
     .inspectorForcedAppearance(terminalManager.surfaceBackgroundColorScheme())

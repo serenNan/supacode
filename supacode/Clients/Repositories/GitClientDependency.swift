@@ -58,6 +58,8 @@ struct GitClientDependency: Sendable {
   var isBareRepository: @Sendable (_ repoRoot: URL) async throws -> Bool
   var branchName: @Sendable (URL) async -> String?
   var lineChanges: @Sendable (URL) async -> (added: Int, removed: Int)?
+  var commitHistory: @Sendable (_ worktreeURL: URL, _ limit: Int) async throws -> GitHistorySnapshot
+  var commitDetail: @Sendable (_ worktreeURL: URL, _ hash: String) async throws -> GitCommitDetail
   var remoteNames: @Sendable (_ repoRoot: URL) async throws -> [String]
   var fetchRemote: @Sendable (_ remote: String, _ repoRoot: URL) async throws -> Void
   var remoteInfo: @Sendable (_ repositoryRoot: URL) async -> GithubRemoteInfo?
@@ -138,6 +140,12 @@ extension GitClientDependency: DependencyKey {
       },
       branchName: { await GitClient(shell: shell).symbolicHeadBranch(at: $0) },
       lineChanges: { await GitClient(shell: shell).lineChanges(at: $0) },
+      commitHistory: { worktreeURL, limit in
+        try await GitClient(shell: shell).commitHistory(at: worktreeURL, limit: limit)
+      },
+      commitDetail: { worktreeURL, hash in
+        try await GitClient(shell: shell).commitDetail(at: worktreeURL, hash: hash)
+      },
       remoteNames: { try await GitClient(shell: shell).remoteNames(for: $0) },
       fetchRemote: { remote, repoRoot in try await GitClient(shell: shell).fetchRemote(remote, for: repoRoot) },
       remoteInfo: { repositoryRoot in

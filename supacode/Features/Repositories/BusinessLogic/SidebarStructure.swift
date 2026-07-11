@@ -420,6 +420,11 @@ extension RepositoriesFeature.Action {
     case .cliWorktreeAckCancelled:
       return []
 
+    // Mutates only `state.gitHistory`, which the inspector pane reads directly;
+    // no sidebar cache consumes it.
+    case .gitHistory:
+      return []
+
     // `worktreeBranchNameLoaded` mutates `worktree.name` via `updateWorktreeName`,
     // which feeds `computeToolbarNotificationGroups()` (notification group title).
     // Without `.toolbarNotificationGroups` the popover would show the old name
