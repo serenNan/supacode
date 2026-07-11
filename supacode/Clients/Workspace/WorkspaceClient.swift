@@ -88,6 +88,21 @@ enum WorktreeOpener {
     )
   }
 
+  /// Opens one local file in the user's default editor (Settings → Default
+  /// Editor), falling back to the system-default application when no editor
+  /// resolves ($EDITOR and Finder have no file-opening app to hand off to).
+  static func openFile(at fileURL: URL, defaultEditorID: String?) {
+    let action = OpenWorktreeAction.fromSettingsID(nil, defaultEditorID: defaultEditorID)
+    guard action != .editor, action != .finder,
+      let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: action.bundleIdentifier)
+    else {
+      NSWorkspace.shared.open(fileURL)
+      return
+    }
+    NSWorkspace.shared.open(
+      [fileURL], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration())
+  }
+
   /// The pre-launch outcome for a remote open: the process to run, or the error
   /// to surface. Pure (no `Process` / AppKit), so the guards are unit-testable.
   enum RemoteLaunchPlan: Equatable {

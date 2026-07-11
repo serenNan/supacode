@@ -45,6 +45,26 @@ struct WorktreeGitHistoryInspectorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
+    .sheet(
+      isPresented: Binding(
+        get: { repositoriesStore.gitHistory?.presentedDiff != nil },
+        set: { isPresented in
+          if !isPresented {
+            repositoriesStore.send(.gitHistory(.diffDismissed))
+          }
+        }
+      )
+    ) {
+      if let presented = repositoriesStore.gitHistory?.presentedDiff {
+        WorktreeFileDiffSheetView(
+          presented: presented,
+          worktree: repositoriesStore.gitHistory.flatMap {
+            repositoriesStore.state.worktree(for: $0.worktreeID)
+          },
+          onDismiss: { repositoriesStore.send(.gitHistory(.diffDismissed)) }
+        )
+      }
+    }
   }
 }
 
@@ -106,7 +126,10 @@ private struct GitHistoryList: View {
               isExpanded: history.isUncommittedExpanded,
               files: history.uncommittedFiles,
               filesError: history.uncommittedFilesError,
-              onTap: { repositoriesStore.send(.gitHistory(.uncommittedTapped)) }
+              onTap: { repositoriesStore.send(.gitHistory(.uncommittedTapped)) },
+              onFileTap: { path in
+                repositoriesStore.send(.gitHistory(.fileTapped(source: .uncommitted, path: path)))
+              }
             )
           }
         }
@@ -144,7 +167,11 @@ private struct GitHistoryList: View {
         isExpanded: history.expandedCommitHash == commit.hash,
         expandedDetail: history.expandedDetail,
         detailError: history.detailError,
-        onTap: { repositoriesStore.send(.gitHistory(.commitTapped(hash: commit.hash))) }
+        onTap: { repositoriesStore.send(.gitHistory(.commitTapped(hash: commit.hash))) },
+        onFileTap: { path in
+          repositoriesStore.send(
+            .gitHistory(.fileTapped(source: .commit(hash: commit.hash), path: path)))
+        }
       )
     }
   }
@@ -157,6 +184,7 @@ private struct UncommittedChangesRow: View {
   let files: [GitCommitFileChange]?
   let filesError: String?
   let onTap: () -> Void
+  let onFileTap: (String) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -180,7 +208,7 @@ private struct UncommittedChangesRow: View {
       if isExpanded {
         Group {
           if let files {
-            GitFileChangeList(files: files)
+            GitFileChangeList(files: files, onFileTap: onFileTap)
           } else if let filesError {
             Label(filesError, systemImage: "exclamationmark.triangle")
               .font(.caption)
@@ -200,6 +228,7 @@ private struct UncommittedChangesRow: View {
 
 private struct GitFileChangeList: View {
   let files: [GitCommitFileChange]
+  let onFileTap: (String) -> Void
 
   var body: some View {
     if files.isEmpty {
@@ -209,22 +238,29 @@ private struct GitFileChangeList: View {
     } else {
       VStack(alignment: .leading, spacing: 3) {
         ForEach(files) { file in
-          HStack(spacing: 6) {
-            Text(file.path)
-              .font(.caption)
-              .monospaced()
-              .lineLimit(1)
-              .truncationMode(.middle)
-              .help(file.path)
-            Spacer(minLength: 4)
-            if let added = file.added, let removed = file.removed {
-              DiffStatText(added: added, removed: removed)
-            } else {
-              Text("binary")
+          Button {
+            onFileTap(file.path)
+          } label: {
+            HStack(spacing: 6) {
+              Text(file.path)
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .monospaced()
+                .lineLimit(1)
+                .truncationMode(.middle)
+              Spacer(minLength: 4)
+              if let added = file.added, let removed = file.removed {
+                DiffStatText(added: added, removed: removed)
+              } else {
+                Text("binary")
+                  .font(.caption)
+                  .foregroundStyle(.tertiary)
+              }
             }
+            .contentShape(.rect)
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
+          .buttonStyle(.plain)
+          .help("Show this file's diff.")
         }
       }
     }
@@ -238,6 +274,7 @@ private struct GitCommitRow: View {
   let expandedDetail: GitCommitDetail?
   let detailError: String?
   let onTap: () -> Void
+  let onFileTap: (String) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -277,9 +314,11 @@ private struct GitCommitRow: View {
       .help(commit.subject)
 
       if isExpanded {
-        GitCommitDetailView(commit: commit, detail: expandedDetail, detailError: detailError)
-          .padding(.top, 6)
-          .padding(.leading, 19)
+        GitCommitDetailView(
+          commit: commit, detail: expandedDetail, detailError: detailError, onFileTap: onFileTap
+        )
+        .padding(.top, 6)
+        .padding(.leading, 19)
       }
     }
     .contextMenu {
@@ -351,6 +390,7 @@ private struct GitCommitDetailView: View {
   let commit: GitCommitSummary
   let detail: GitCommitDetail?
   let detailError: String?
+  let onFileTap: (String) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -369,7 +409,7 @@ private struct GitCommitDetailView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         if !detail.files.isEmpty {
-          GitFileChangeList(files: detail.files)
+          GitFileChangeList(files: detail.files, onFileTap: onFileTap)
         }
       } else if let detailError {
         Label(detailError, systemImage: "exclamationmark.triangle")

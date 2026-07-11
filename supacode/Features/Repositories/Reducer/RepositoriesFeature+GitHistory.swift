@@ -5,6 +5,7 @@ private nonisolated enum GitHistoryCancelID: Hashable {
   case load
   case detail
   case uncommittedFiles
+  case fileDiff
 }
 
 extension RepositoriesFeature {
@@ -27,6 +28,21 @@ extension RepositoriesFeature {
     var isUncommittedExpanded = false
     var uncommittedFiles: [GitCommitFileChange]?
     var uncommittedFilesError: String?
+    var presentedDiff: PresentedFileDiff?
+  }
+
+  /// The one file diff shown in the sheet over the detail area. `diff` and
+  /// `error` are both nil while the load is in flight.
+  struct PresentedFileDiff: Equatable, Sendable {
+    enum Source: Equatable, Sendable {
+      case uncommitted
+      case commit(hash: String)
+    }
+
+    var source: Source
+    var filePath: String
+    var diff: GitFileDiff? = nil
+    var error: String? = nil
   }
 
   @CasePathable
@@ -40,6 +56,12 @@ extension RepositoriesFeature {
     case uncommittedTapped
     case uncommittedFilesLoaded(worktreeID: Worktree.ID, [GitCommitFileChange])
     case uncommittedFilesFailed(worktreeID: Worktree.ID, message: String)
+    case fileTapped(source: PresentedFileDiff.Source, path: String)
+    case fileDiffLoaded(
+      worktreeID: Worktree.ID, source: PresentedFileDiff.Source, path: String, GitFileDiff)
+    case fileDiffFailed(
+      worktreeID: Worktree.ID, source: PresentedFileDiff.Source, path: String, message: String)
+    case diffDismissed
   }
 
   static let gitHistoryCommitLimit = 200
@@ -158,6 +180,64 @@ extension RepositoriesFeature {
         state.gitHistory?.uncommittedFilesError = message
         return .none
 
+      case .gitHistory(.fileTapped(let source, let path)):
+        guard var history = state.gitHistory,
+          let worktree = state.worktree(for: history.worktreeID)
+        else {
+          return .none
+        }
+        history.presentedDiff = PresentedFileDiff(source: source, filePath: path)
+        state.gitHistory = history
+        let client = historyGitClient(for: worktree)
+        let worktreeURL = worktree.workingDirectory
+        let worktreeID = worktree.id
+        return .run { send in
+          do {
+            let diff =
+              switch source {
+              case .uncommitted:
+                try await client.uncommittedFileDiff(worktreeURL, path)
+              case .commit(let hash):
+                try await client.commitFileDiff(worktreeURL, hash, path)
+              }
+            await send(
+              .gitHistory(
+                .fileDiffLoaded(worktreeID: worktreeID, source: source, path: path, diff)))
+          } catch {
+            await send(
+              .gitHistory(
+                .fileDiffFailed(
+                  worktreeID: worktreeID, source: source, path: path,
+                  message: error.localizedDescription)))
+          }
+        }
+        .cancellable(id: GitHistoryCancelID.fileDiff, cancelInFlight: true)
+
+      case .gitHistory(.fileDiffLoaded(let worktreeID, let source, let path, let diff)):
+        guard state.gitHistory?.worktreeID == worktreeID,
+          state.gitHistory?.presentedDiff?.source == source,
+          state.gitHistory?.presentedDiff?.filePath == path
+        else {
+          return .none
+        }
+        state.gitHistory?.presentedDiff?.diff = diff
+        return .none
+
+      case .gitHistory(.fileDiffFailed(let worktreeID, let source, let path, let message)):
+        guard state.gitHistory?.worktreeID == worktreeID,
+          state.gitHistory?.presentedDiff?.source == source,
+          state.gitHistory?.presentedDiff?.filePath == path
+        else {
+          return .none
+        }
+        state.gitHistory?.presentedDiff?.error = message
+        return .none
+
+      case .gitHistory(.diffDismissed):
+        guard state.gitHistory?.presentedDiff != nil else { return .none }
+        state.gitHistory?.presentedDiff = nil
+        return .cancel(id: GitHistoryCancelID.fileDiff)
+
       case .sidebarItems(
         .element(id: let worktreeID, action: .diffStatsChanged(let added, let removed))):
         guard state.gitHistory?.worktreeID == worktreeID else { return .none }
@@ -187,7 +267,8 @@ extension RepositoriesFeature {
           return .merge(
             .cancel(id: GitHistoryCancelID.load),
             .cancel(id: GitHistoryCancelID.detail),
-            .cancel(id: GitHistoryCancelID.uncommittedFiles)
+            .cancel(id: GitHistoryCancelID.uncommittedFiles),
+            .cancel(id: GitHistoryCancelID.fileDiff)
           )
         }
         guard state.gitHistory?.worktreeID != worktree.id else { return .none }

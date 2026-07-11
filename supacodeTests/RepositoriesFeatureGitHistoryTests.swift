@@ -482,4 +482,168 @@ struct RepositoriesFeatureGitHistoryTests {
       $0.gitHistory = nil
     }
   }
+
+  private func makeFileDiff() -> GitFileDiff {
+    GitFileDiff(
+      hunks: [
+        GitDiffHunk(
+          header: "@@ -1 +1 @@",
+          lines: [GitDiffLine(kind: .added, text: "new", oldNumber: nil, newNumber: 1)]
+        )
+      ],
+      isBinary: false
+    )
+  }
+
+  private func makeHistoryVisibleState(worktree: Worktree, repository: Repository)
+    -> RepositoriesFeature.State
+  {
+    var state = makeState(repositories: [repository], selection: .worktree(worktree.id))
+    state.inspectorPane = .history
+    state.inspectorPresented = true
+    state.gitHistory = RepositoriesFeature.GitHistoryState(
+      worktreeID: worktree.id, snapshot: makeSnapshot())
+    return state
+  }
+
+  @Test func fileTapPresentsAndLoadsUncommittedDiff() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    let diff = makeFileDiff()
+    let requestedPath = LockIsolated("")
+    let store = TestStore(
+      initialState: makeHistoryVisibleState(worktree: worktree, repository: repository)
+    ) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+      $0.gitClient.uncommittedFileDiff = { _, path in
+        requestedPath.setValue(path)
+        return diff
+      }
+    }
+
+    await store.send(.gitHistory(.fileTapped(source: .uncommitted, path: "supacode/A.swift"))) {
+      $0.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
+        source: .uncommitted, filePath: "supacode/A.swift")
+    }
+    await store.receive(\.gitHistory.fileDiffLoaded) {
+      $0.gitHistory?.presentedDiff?.diff = diff
+    }
+    #expect(requestedPath.value == "supacode/A.swift")
+  }
+
+  @Test func fileTapInCommitLoadsCommitDiff() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    let diff = makeFileDiff()
+    let requestedHash = LockIsolated("")
+    let store = TestStore(
+      initialState: makeHistoryVisibleState(worktree: worktree, repository: repository)
+    ) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+      $0.gitClient.commitFileDiff = { _, hash, _ in
+        requestedHash.setValue(hash)
+        return diff
+      }
+    }
+
+    await store.send(
+      .gitHistory(.fileTapped(source: .commit(hash: Self.hash1), path: "README.md"))
+    ) {
+      $0.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
+        source: .commit(hash: Self.hash1), filePath: "README.md")
+    }
+    await store.receive(\.gitHistory.fileDiffLoaded) {
+      $0.gitHistory?.presentedDiff?.diff = diff
+    }
+    #expect(requestedHash.value == Self.hash1)
+  }
+
+  @Test func fileDiffFailureShowsError() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    let store = TestStore(
+      initialState: makeHistoryVisibleState(worktree: worktree, repository: repository)
+    ) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+      $0.gitClient.uncommittedFileDiff = { _, _ in
+        throw GitClientError.commandFailed(command: "git diff", message: "boom")
+      }
+    }
+
+    await store.send(.gitHistory(.fileTapped(source: .uncommitted, path: "A.swift"))) {
+      $0.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
+        source: .uncommitted, filePath: "A.swift")
+    }
+    await store.receive(\.gitHistory.fileDiffFailed) {
+      $0.gitHistory?.presentedDiff?.error = GitClientError.commandFailed(
+        command: "git diff", message: "boom"
+      ).localizedDescription
+    }
+  }
+
+  @Test func staleFileDiffResponsesAreIgnored() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    var initialState = makeHistoryVisibleState(worktree: worktree, repository: repository)
+    initialState.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
+      source: .uncommitted, filePath: "Current.swift")
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+    }
+
+    await store.send(
+      .gitHistory(
+        .fileDiffLoaded(
+          worktreeID: worktree.id, source: .uncommitted, path: "Other.swift", makeFileDiff()))
+    )
+    await store.send(
+      .gitHistory(
+        .fileDiffFailed(
+          worktreeID: WorktreeID("/tmp/repo/wt2"), source: .uncommitted, path: "Current.swift",
+          message: "boom"))
+    )
+  }
+
+  @Test func diffDismissedClearsPresentedDiff() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    var initialState = makeHistoryVisibleState(worktree: worktree, repository: repository)
+    initialState.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
+      source: .uncommitted, filePath: "A.swift", diff: makeFileDiff())
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+    }
+
+    await store.send(.gitHistory(.diffDismissed)) {
+      $0.gitHistory?.presentedDiff = nil
+    }
+  }
+
+  @Test func closingInspectorDismissesPresentedDiff() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    var initialState = makeHistoryVisibleState(worktree: worktree, repository: repository)
+    initialState.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
+      source: .uncommitted, filePath: "A.swift", diff: makeFileDiff())
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+    }
+
+    await store.send(.toggleInspectorPane(.history)) {
+      $0.inspectorPresented = false
+      $0.gitHistory = nil
+    }
+  }
 }

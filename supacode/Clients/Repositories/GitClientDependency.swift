@@ -61,6 +61,9 @@ struct GitClientDependency: Sendable {
   var commitHistory: @Sendable (_ worktreeURL: URL, _ limit: Int) async throws -> GitHistorySnapshot
   var commitDetail: @Sendable (_ worktreeURL: URL, _ hash: String) async throws -> GitCommitDetail
   var uncommittedFiles: @Sendable (_ worktreeURL: URL) async throws -> [GitCommitFileChange]
+  var uncommittedFileDiff: @Sendable (_ worktreeURL: URL, _ path: String) async throws -> GitFileDiff
+  var commitFileDiff:
+    @Sendable (_ worktreeURL: URL, _ hash: String, _ path: String) async throws -> GitFileDiff
   var remoteNames: @Sendable (_ repoRoot: URL) async throws -> [String]
   var fetchRemote: @Sendable (_ remote: String, _ repoRoot: URL) async throws -> Void
   var remoteInfo: @Sendable (_ repositoryRoot: URL) async -> GithubRemoteInfo?
@@ -149,6 +152,12 @@ extension GitClientDependency: DependencyKey {
       },
       uncommittedFiles: { worktreeURL in
         try await GitClient(shell: shell).uncommittedChanges(at: worktreeURL)
+      },
+      uncommittedFileDiff: { worktreeURL, path in
+        try await GitClient(shell: shell).uncommittedFileDiff(at: worktreeURL, path: path)
+      },
+      commitFileDiff: { worktreeURL, hash, path in
+        try await GitClient(shell: shell).commitFileDiff(at: worktreeURL, hash: hash, path: path)
       },
       remoteNames: { try await GitClient(shell: shell).remoteNames(for: $0) },
       fetchRemote: { remote, repoRoot in try await GitClient(shell: shell).fetchRemote(remote, for: repoRoot) },
