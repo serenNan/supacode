@@ -103,12 +103,22 @@ struct SidebarItemFeature {
 
     var agents: [AgentPresenceFeature.AgentInstance] = []
     var hasAgentActivity: Bool = false
+    /// Running agents grouped by terminal tab, fed by the parent's
+    /// agent-presence fan-out. Read by the expanded per-tab sub-rows so each
+    /// row can show its own agent mark instead of the generic tab icon.
+    var tabAgents: [TerminalTabID: [AgentPresenceFeature.AgentInstance]] = [:]
 
     var surfaceIDs: [UUID] = []
     /// Sticky once `terminalProjectionChanged` arrives, so a subsequent
     /// `surfaceIDs == []` (user closed every tab) doesn't re-seed dead UUIDs
     /// from the last-quit layout snapshot.
     var hasTerminalProjection: Bool = false
+    /// Mirror of the worktree's terminal tab strip; the sole populator is
+    /// `tabsSnapshotChanged`, fed from `TerminalClient.Event.worktreeTabsChanged`.
+    var tabsSummary: WorktreeTabsSummary = WorktreeTabsSummary()
+    /// Whether the row's per-tab sub-rows are expanded. In-memory only: tabs are
+    /// runtime entities, so the expansion doesn't persist across relaunch.
+    var isTabListExpanded: Bool = false
     /// Ghostty progress busy on any surface. Combined with `hasAgentActivity` for shimmer.
     var isProgressBusy: Bool = false
     var hasUnseenNotifications: Bool = false
@@ -127,7 +137,10 @@ struct SidebarItemFeature {
     case pullRequestQueryStarted(branch: String)
     case pullRequestChanged(GithubPullRequest?, branchAtQueryTime: String)
     case agentSnapshotChanged([AgentPresenceFeature.AgentInstance], hasActivity: Bool)
+    case tabAgentsChanged([TerminalTabID: [AgentPresenceFeature.AgentInstance]])
     case terminalProjectionChanged(WorktreeRowProjection)
+    case tabsSnapshotChanged(WorktreeTabsSummary)
+    case tabListExpansionToggled
     case dragSessionChanged(isDragging: Bool)
     case focusTerminalRequested
     case focusTerminalConsumed
@@ -171,6 +184,11 @@ struct SidebarItemFeature {
         state.hasAgentActivity = hasActivity
         return .none
 
+      case .tabAgentsChanged(let tabAgents):
+        guard state.tabAgents != tabAgents else { return .none }
+        state.tabAgents = tabAgents
+        return .none
+
       case .terminalProjectionChanged(let projection):
         if !state.hasTerminalProjection { state.hasTerminalProjection = true }
         if state.surfaceIDs != projection.surfaceIDs { state.surfaceIDs = projection.surfaceIDs }
@@ -184,6 +202,19 @@ struct SidebarItemFeature {
         if state.runningScripts != projection.runningScripts {
           state.runningScripts = projection.runningScripts
         }
+        return .none
+
+      case .tabsSnapshotChanged(let summary):
+        if state.tabsSummary != summary { state.tabsSummary = summary }
+        // A row that fell to 0/1 tabs has nothing to expand; reset so a later
+        // multi-tab state starts collapsed.
+        if summary.tabs.count <= 1, state.isTabListExpanded {
+          state.isTabListExpanded = false
+        }
+        return .none
+
+      case .tabListExpansionToggled:
+        state.isTabListExpanded.toggle()
         return .none
 
       case .dragSessionChanged(let isDragging):
@@ -276,6 +307,22 @@ struct WorktreeRowProjection: Equatable, Sendable {
   /// Terminal-tracked user scripts; the sole populator of the row's
   /// `runningScripts`, so the dropdown can't drift from process state (#573).
   var runningScripts: IdentifiedArrayOf<SidebarItemFeature.State.RunningScript> = []
+}
+
+/// Per-worktree snapshot of the terminal tab strip (titles / icons / selected
+/// tab), emitted separately from `WorktreeRowProjection` so title storms never
+/// touch the sidebar-structure recompute path. Consumed by
+/// `SidebarItemFeature.tabsSnapshotChanged`.
+struct WorktreeTabsSummary: Equatable, Sendable {
+  struct Tab: Equatable, Identifiable, Sendable {
+    let id: TerminalTabID
+    let title: String
+    let icon: String?
+    let tint: RepositoryColor?
+  }
+
+  var tabs: [Tab] = []
+  var selectedTabID: TerminalTabID?
 }
 
 /// Value-typed projection of the focused row's display fields, cached on

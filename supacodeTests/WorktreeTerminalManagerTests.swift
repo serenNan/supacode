@@ -135,6 +135,33 @@ struct WorktreeTerminalManagerTests {
     #expect(event == .setupScriptConsumed(worktreeID: worktree.id))
   }
 
+  @Test func emitsTabsSummaryOnTitleAndSelectionChange() async {
+    let manager = WorktreeTerminalManager(runtime: GhosttyRuntime())
+    let worktree = makeWorktree()
+    let state = manager.state(for: worktree)
+    let stream = manager.eventStream()
+    guard let tab = state.createTab() else {
+      Issue.record("Expected a tab")
+      return
+    }
+    let eventTask = Task {
+      await nextEvent(stream) { event in
+        guard case .worktreeTabsChanged(let id, let summary) = event, id == worktree.id else {
+          return false
+        }
+        return summary.tabs.first?.title == "Claude Code"
+      }
+    }
+    state.tabManager.updateTitle(tab, title: "Claude Code")
+    let event = await eventTask.value
+    guard case .worktreeTabsChanged(_, let summary)? = event else {
+      Issue.record("Expected worktreeTabsChanged, got \(String(describing: event))")
+      return
+    }
+    #expect(summary.selectedTabID == tab)
+    #expect(summary.tabs.count == 1)
+  }
+
   @Test func unavailableSocketServerIsDiscarded() {
     let server = AgentHookSocketServer(socketPathOverride: "/tmp/supacode-tests/\(UUID().uuidString)")
     server.shutdown()

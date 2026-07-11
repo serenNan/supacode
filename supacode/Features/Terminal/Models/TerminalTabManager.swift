@@ -8,12 +8,22 @@ final class TerminalTabManager {
   var tabs: [TerminalTabItem] = [] {
     // Drops `editingTabID` when the edited tab disappears across any close path.
     didSet {
+      onSnapshotChanged?()
       guard let id = editingTabID, !tabs.contains(where: { $0.id == id }) else { return }
       editingTabID = nil
     }
   }
-  var selectedTabId: TerminalTabID?
+  var selectedTabId: TerminalTabID? {
+    didSet {
+      guard oldValue != selectedTabId else { return }
+      onSnapshotChanged?()
+    }
+  }
   private(set) var editingTabID: TerminalTabID?
+  /// Fires on any tab-array mutation (create / close / reorder / title / dirty)
+  /// or selected-tab change. `WorktreeTerminalState` coalesces this into a
+  /// next-tick tabs-summary projection emit.
+  var onSnapshotChanged: (() -> Void)?
 
   private static let logger = SupaLogger("TabManager")
 

@@ -79,6 +79,11 @@ struct TerminalClient {
     /// Per-worktree projection emitted when surfaces / task-running / unseen / notifications drift.
     /// Routed by the parent into the matching `SidebarItemFeature` via the row's id.
     case worktreeProjectionChanged(Worktree.ID, WorktreeRowProjection)
+    /// Per-worktree tab-strip snapshot (titles / icons / selected tab). Emitted
+    /// separately from `worktreeProjectionChanged` so per-keystroke shell-title
+    /// churn never invalidates sidebar-structure caches. Routed into the matching
+    /// `SidebarItemFeature` via the row's id.
+    case worktreeTabsChanged(Worktree.ID, WorktreeTabsSummary)
     /// Per-tab projection emitted when a tab's surfaces, focused pane, or unread
     /// count drifts. Routed into the matching `TerminalTabFeature.State` via tab id.
     case tabProjectionChanged(worktreeID: Worktree.ID, WorktreeTabProjection)

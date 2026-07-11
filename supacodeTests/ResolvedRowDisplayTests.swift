@@ -35,9 +35,9 @@ struct ResolvedRowDisplayTests {
     #expect(resolved.subtitle == .none)
   }
 
-  // MARK: - Per-repo subtitle path (no highlight tag).
+  // MARK: - Title resolution (worktree folder name, branch in the subtitle).
 
-  @Test func plainSubtitleShowsWorktreeNameWhenNoMatch() {
+  @Test func titleIsWorktreeFolderNameAndBranchMovesToSubtitle() {
     let resolved = ResolvedRowDisplay(
       kind: .gitWorktree,
       branchName: "feature/foo",
@@ -47,8 +47,39 @@ struct ResolvedRowDisplayTests {
       hideSubtitle: false,
       hideSubtitleOnMatch: true
     )
-    #expect(resolved.subtitle == .plain("scratch"))
+    #expect(resolved.name == "scratch")
+    #expect(resolved.subtitle == .plain("feature/foo"))
   }
+
+  @Test func customTitleBeatsFolderName() {
+    let resolved = ResolvedRowDisplay(
+      kind: .gitWorktree,
+      branchName: "main",
+      worktreeName: "supacode",
+      isMainWorktree: true,
+      isPinned: false,
+      hideSubtitle: false,
+      hideSubtitleOnMatch: true,
+      customTitle: "My Repo"
+    )
+    #expect(resolved.name == "My Repo")
+    #expect(resolved.subtitle == .plain("main"))
+  }
+
+  @Test func nilWorktreeNameFallsBackToBranchTitle() {
+    let resolved = ResolvedRowDisplay(
+      kind: .gitWorktree,
+      branchName: "feature/foo",
+      worktreeName: nil,
+      isMainWorktree: false,
+      isPinned: false,
+      hideSubtitle: false,
+      hideSubtitleOnMatch: true
+    )
+    #expect(resolved.name == "feature/foo")
+  }
+
+  // MARK: - Per-repo subtitle path (no highlight tag).
 
   @Test func plainSubtitleHidesWhenWorktreeMatchesBranchLastComponentAndFlagOn() {
     let resolved = ResolvedRowDisplay(
@@ -60,10 +91,11 @@ struct ResolvedRowDisplayTests {
       hideSubtitle: false,
       hideSubtitleOnMatch: true
     )
+    #expect(resolved.name == "foo")
     #expect(resolved.subtitle == .none)
   }
 
-  @Test func plainSubtitleKeepsMatchingWorktreeNameWhenFlagOff() {
+  @Test func plainSubtitleKeepsBranchOnMatchWhenFlagOff() {
     let resolved = ResolvedRowDisplay(
       kind: .gitWorktree,
       branchName: "feature/foo",
@@ -73,7 +105,7 @@ struct ResolvedRowDisplayTests {
       hideSubtitle: false,
       hideSubtitleOnMatch: false
     )
-    #expect(resolved.subtitle == .plain("foo"))
+    #expect(resolved.subtitle == .plain("feature/foo"))
   }
 
   @Test func plainSubtitleSuppressedUnconditionallyByHideSubtitle() {
@@ -89,26 +121,40 @@ struct ResolvedRowDisplayTests {
     #expect(resolved.subtitle == .none)
   }
 
-  // MARK: - Highlight trail resolution (the four branches).
+  // MARK: - Highlight trail resolution.
 
-  @Test func highlightTrailIsDefaultForMainWorktree() {
+  @Test func highlightDropsRepoTagWhenItEqualsTheTitle() {
+    // A hoisted main worktree titles itself with the repo folder name; the
+    // repo tag would read as a duplicate, so the subtitle keeps just the branch.
     let resolved = ResolvedRowDisplay(
       kind: .gitWorktree,
       branchName: "main",
-      worktreeName: nil,
+      worktreeName: "supacode",
       isMainWorktree: true,
       isPinned: false,
       hideSubtitle: false,
       hideSubtitleOnMatch: true,
       highlightSubtitle: SidebarHighlightRepoTag(repoName: "supacode", repoColor: .blue, hostInfo: nil)
     )
-    guard case .highlight(let repo, let color, let trail, _) = resolved.subtitle else {
-      Issue.record("Expected .highlight subtitle for main worktree")
-      return
-    }
-    #expect(repo == "supacode")
-    #expect(color == .blue)
-    #expect(trail == "Default")
+    #expect(resolved.name == "supacode")
+    #expect(resolved.subtitle == .plain("main"))
+  }
+
+  @Test func highlightKeepsRepoTagForRemoteEvenWhenItEqualsTheTitle() {
+    let resolved = ResolvedRowDisplay(
+      kind: .gitWorktree,
+      branchName: "main",
+      worktreeName: "supacode",
+      isMainWorktree: true,
+      isPinned: false,
+      hideSubtitle: false,
+      hideSubtitleOnMatch: true,
+      highlightSubtitle: SidebarHighlightRepoTag(repoName: "supacode", repoColor: nil, hostInfo: "dev@build-box")
+    )
+    #expect(
+      resolved.subtitle
+        == .highlight(repo: "supacode", repoColor: nil, trail: "main", hostInfo: "dev@build-box")
+    )
   }
 
   @Test func highlightTrailHidesOnMatchWhenFlagOn() {
@@ -129,7 +175,7 @@ struct ResolvedRowDisplayTests {
     #expect(trail == nil)
   }
 
-  @Test func highlightTrailKeepsMatchingWorktreeNameWhenFlagOff() {
+  @Test func highlightTrailKeepsBranchOnMatchWhenFlagOff() {
     let resolved = ResolvedRowDisplay(
       kind: .gitWorktree,
       branchName: "feature/foo",
@@ -144,10 +190,10 @@ struct ResolvedRowDisplayTests {
       Issue.record("Expected .highlight subtitle")
       return
     }
-    #expect(trail == "foo")
+    #expect(trail == "feature/foo")
   }
 
-  @Test func highlightTrailUsesWorktreeNameWhenPresent() {
+  @Test func highlightTrailIsBranchWhenNoMatch() {
     let resolved = ResolvedRowDisplay(
       kind: .gitWorktree,
       branchName: "feature/foo",
@@ -162,25 +208,8 @@ struct ResolvedRowDisplayTests {
       Issue.record("Expected .highlight subtitle")
       return
     }
-    #expect(trail == "scratch")
-  }
-
-  @Test func highlightTrailCollapsesToRepoWhenWorktreeNameMissing() {
-    let resolved = ResolvedRowDisplay(
-      kind: .gitWorktree,
-      branchName: "feature/foo",
-      worktreeName: nil,
-      isMainWorktree: false,
-      isPinned: false,
-      hideSubtitle: false,
-      hideSubtitleOnMatch: true,
-      highlightSubtitle: SidebarHighlightRepoTag(repoName: "supacode", repoColor: nil, hostInfo: nil)
-    )
-    guard case .highlight(_, _, let trail, _) = resolved.subtitle else {
-      Issue.record("Expected .highlight subtitle")
-      return
-    }
-    #expect(trail == nil)
+    #expect(resolved.name == "scratch")
+    #expect(trail == "feature/foo")
   }
 
   // MARK: - Hide-on-match parity across the two render paths.

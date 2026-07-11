@@ -278,6 +278,66 @@ struct SidebarItemFeatureTests {
     await store.send(.dragSessionChanged(isDragging: true))
   }
 
+  // MARK: - Tab-strip snapshot.
+
+  @Test func tabsSnapshotUpdatesStateAndCollapsesOnSingleTab() async {
+    let tabA = TerminalTabID()
+    let tabB = TerminalTabID()
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    let twoTabs = WorktreeTabsSummary(
+      tabs: [
+        .init(id: tabA, title: "Claude Code", icon: nil, tint: nil),
+        .init(id: tabB, title: "Tests", icon: nil, tint: nil),
+      ],
+      selectedTabID: tabB
+    )
+    await store.send(.tabsSnapshotChanged(twoTabs)) {
+      $0.tabsSummary = twoTabs
+    }
+
+    await store.send(.tabListExpansionToggled) {
+      $0.isTabListExpanded = true
+    }
+
+    // Identical snapshot: no-op.
+    await store.send(.tabsSnapshotChanged(twoTabs))
+
+    // Dropping to one tab resets the expansion.
+    let oneTab = WorktreeTabsSummary(
+      tabs: [.init(id: tabA, title: "Claude Code", icon: nil, tint: nil)],
+      selectedTabID: tabA
+    )
+    await store.send(.tabsSnapshotChanged(oneTab)) {
+      $0.tabsSummary = oneTab
+      $0.isTabListExpanded = false
+    }
+  }
+
+  @Test func tabAgentsSnapshotReplacesWholesaleAndSkipsNoOps() async {
+    let tabA = TerminalTabID()
+    let tabB = TerminalTabID()
+    let claude = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.tabAgentsChanged([tabA: [claude]])) {
+      $0.tabAgents = [tabA: [claude]]
+    }
+    // Same payload: no-op.
+    await store.send(.tabAgentsChanged([tabA: [claude]]))
+    // The fan-out sends the full per-row map, so a new snapshot replaces it
+    // wholesale (agent moved to tabB; tabA drops out).
+    await store.send(.tabAgentsChanged([tabB: [claude]])) {
+      $0.tabAgents = [tabB: [claude]]
+    }
+    // Agents gone: map drains.
+    await store.send(.tabAgentsChanged([:])) {
+      $0.tabAgents = [:]
+    }
+  }
+
   // MARK: - Helpers.
 
   private func makeState(name: String) -> SidebarItemFeature.State {

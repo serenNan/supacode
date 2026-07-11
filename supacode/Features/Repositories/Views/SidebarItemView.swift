@@ -1,3 +1,4 @@
+import AppKit
 import ComposableArchitecture
 import SupacodeSettingsShared
 import SwiftUI
@@ -25,6 +26,10 @@ struct SidebarItemView: View {
   let hideSubtitle: Bool
   let hideSubtitleOnMatch: Bool
   let showsPullRequestInfo: Bool
+  /// Mirror of `@Shared(.sidebarShowsSessionTitles)`: multi-tab worktree rows
+  /// grow an expander (count + chevron, row-body click) revealing per-tab
+  /// sub-rows. The row title itself always stays the project name.
+  let showsSessionTitles: Bool
   let shortcutHint: String?
   /// Trailing branch-component label injected by the branch-nesting renderer so
   /// a row nested under a `feature/tools` header reads as `a` instead of the
@@ -40,7 +45,9 @@ struct SidebarItemView: View {
     let resolved = ResolvedRowDisplay(
       kind: store.kind,
       branchName: displayNameOverride ?? store.branchName,
-      worktreeName: store.sidebarDisplayName,
+      // Main worktrees have no `sidebarDisplayName` (nil by design); their
+      // "project name" is the repo folder itself.
+      worktreeName: store.sidebarDisplayName ?? store.workingDirectory.lastPathComponent,
       isMainWorktree: store.isMainWorktree,
       isPinned: store.isPinned,
       hideSubtitle: hideSubtitle,
@@ -52,20 +59,28 @@ struct SidebarItemView: View {
 
     Label {
       HStack(spacing: 8) {
-        TitleView(
-          name: resolved.name,
-          subtitle: resolved.subtitle,
-          accent: resolved.accent,
-          customTint: store.customTint,
-          isLifecycleBusy: store.lifecycle.isBusy,
-          isTaskRunning: store.isTaskRunning
-        )
-        .equatable()
-        Spacer(minLength: 0)
+        HStack(spacing: 0) {
+          TitleView(
+            name: resolved.name,
+            subtitle: resolved.subtitle,
+            customTint: store.customTint,
+            isLifecycleBusy: store.lifecycle.isBusy,
+            isTaskRunning: store.isTaskRunning
+          )
+          .equatable()
+          Spacer(minLength: 0)
+        }
+        .contentShape(.interaction, .rect)
+        .accessibilityAddTraits(.isButton)
+        // Simultaneous so the List row still selects on the same click; the
+        // trailing controls (bell, expander) sit outside this area so their
+        // clicks don't double-toggle.
+        .simultaneousGesture(TapGesture().onEnded { toggleTabListFromRowClick() })
         TrailingView(
           store: store,
           shortcutHint: shortcutHint,
-          showsPullRequestInfo: showsPullRequestInfo
+          showsPullRequestInfo: showsPullRequestInfo,
+          showsSessionTitles: showsSessionTitles
         )
       }
     } icon: {
@@ -83,6 +98,17 @@ struct SidebarItemView: View {
     .listRowInsets(.leading, CGFloat(nestDepth) * SidebarNestLayout.indentStep)
     .listRowInsets(.trailing, 4)
     .listRowInsets(.vertical, 6)
+  }
+
+  /// Row-body click on a multi-tab worktree toggles the per-tab sub-rows, so
+  /// the whole title area works as the expander (the trailing chevron stays as
+  /// the explicit control). ⌘/⇧ clicks are selection gestures and skip it.
+  private func toggleTabListFromRowClick() {
+    guard showsSessionTitles, store.kind == .gitWorktree,
+      store.tabsSummary.tabs.count > 1,
+      NSEvent.modifierFlags.isDisjoint(with: [.command, .shift])
+    else { return }
+    store.send(.tabListExpansionToggled)
   }
 }
 
@@ -128,9 +154,12 @@ struct ResolvedRowDisplay: Equatable {
       return
     }
 
-    let resolvedWorktreeName = worktreeName ?? "Default"
+    // The title is the worktree's folder name (the "project"); the branch
+    // rides the subtitle. A nil/empty folder name degenerates to the branch
+    // so the title never goes blank.
+    let resolvedWorktreeName = worktreeName ?? branchName
     let effectiveWorktreeName = resolvedWorktreeName.isEmpty ? branchName : resolvedWorktreeName
-    self.name = resolvedCustom ?? branchName
+    self.name = resolvedCustom ?? effectiveWorktreeName
 
     let branchLastComponent = branchName.split(separator: "/").last.map(String.init) ?? branchName
     let isMatch = effectiveWorktreeName == branchLastComponent
@@ -139,29 +168,28 @@ struct ResolvedRowDisplay: Equatable {
     let shouldHideOnMatch = hideSubtitleOnMatch && !hasCustomTitle && isMatch
 
     if let highlightSubtitle {
-      let trail: String?
-      if shouldHideOnMatch {
-        trail = nil
-      } else if isMainWorktree {
-        trail = "Default"
-      } else if let worktreeName, !worktreeName.isEmpty {
-        trail = worktreeName
+      let trail: String? = shouldHideOnMatch ? nil : branchName
+      // The repo tag is a disambiguator; when it's already the row title
+      // (a hoisted main worktree), echoing it in the subtitle reads as a
+      // duplicate — drop it and keep just the branch. Remote rows keep the
+      // full form so the host tag stays visible.
+      if highlightSubtitle.repoName == self.name, highlightSubtitle.hostInfo == nil {
+        self.subtitle = trail.map { .plain($0) } ?? .none
       } else {
-        trail = nil
+        self.subtitle = .highlight(
+          repo: highlightSubtitle.repoName,
+          repoColor: highlightSubtitle.repoColor,
+          trail: trail,
+          hostInfo: highlightSubtitle.hostInfo
+        )
       }
-      self.subtitle = .highlight(
-        repo: highlightSubtitle.repoName,
-        repoColor: highlightSubtitle.repoColor,
-        trail: trail,
-        hostInfo: highlightSubtitle.hostInfo
-      )
       return
     }
 
     if hideSubtitle || shouldHideOnMatch {
       self.subtitle = .none
     } else {
-      self.subtitle = .plain(effectiveWorktreeName)
+      self.subtitle = .plain(branchName)
     }
   }
 }
@@ -263,7 +291,6 @@ enum SidebarPullRequestIcon: Equatable {
 private struct TitleView: View, Equatable {
   let name: String
   let subtitle: ResolvedRowDisplay.Subtitle
-  let accent: WorktreeAccent
   /// User-supplied row tint. When set, paints the title; otherwise the title uses the default.
   let customTint: RepositoryColor?
   let isLifecycleBusy: Bool
@@ -274,7 +301,6 @@ private struct TitleView: View, Equatable {
   static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.name == rhs.name
       && lhs.subtitle == rhs.subtitle
-      && lhs.accent == rhs.accent
       && lhs.customTint == rhs.customTint
       && lhs.isLifecycleBusy == rhs.isLifecycleBusy
       && lhs.isTaskRunning == rhs.isTaskRunning
@@ -283,7 +309,8 @@ private struct TitleView: View, Equatable {
   var body: some View {
     let isBusy = isLifecycleBusy || isTaskRunning
     let isEmphasized = backgroundProminence == .increased
-    let accentStyle = accent.shapeStyle(emphasized: isEmphasized)
+    // The branch subtitle stays neutral; main/pinned accents no longer tint it.
+    let accentStyle: AnyShapeStyle = isEmphasized ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary)
     VStack(alignment: .leading, spacing: 0) {
       let titleText = Text(name)
         .font(.body)
@@ -499,6 +526,7 @@ private struct TrailingView: View {
   let store: StoreOf<SidebarItemFeature>
   let shortcutHint: String?
   let showsPullRequestInfo: Bool
+  let showsSessionTitles: Bool
 
   var body: some View {
     let hasHint = shortcutHint != nil
@@ -507,7 +535,9 @@ private struct TrailingView: View {
       pullRequest: showsPullRequestInfo ? store.pullRequest : nil,
     )
     let prText = display.pullRequestBadgeStyle?.text
-    let agents = store.agents
+    // While the tab list is expanded each sub-row carries its own agent mark,
+    // so the aggregated badge group leaves the parent row.
+    let agents = showsSessionTitles && store.isTabListExpanded ? [] : store.agents
     let scriptColors = store.runningScripts.map(\.tint)
     let showsNotificationIndicator = store.hasUnseenNotifications
     let notifications = Array(store.notifications)
@@ -517,48 +547,91 @@ private struct TrailingView: View {
     let hasStatus = !scriptColors.isEmpty || showsNotificationIndicator
 
     // Cross-fade via opacity so flipping ⌘ doesn't snap the row.
-    ZStack(alignment: .trailing) {
-      HStack(spacing: 6) {
-        if store.kind == .folder, let host = store.host {
-          Image(systemName: "wifi")
-            .imageScale(.small)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .help(host.displayAuthority)
-            .accessibilityLabel("Remote host \(host.displayAuthority)")
-        }
-        if hasStats {
-          DiffStatsContent(addedLines: added, removedLines: removed)
+    HStack(spacing: 6) {
+      ZStack(alignment: .trailing) {
+        HStack(spacing: 6) {
+          if store.kind == .folder, let host = store.host {
+            Image(systemName: "wifi")
+              .imageScale(.small)
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .help(host.displayAuthority)
+              .accessibilityLabel("Remote host \(host.displayAuthority)")
+          }
+          if hasStats {
+            DiffStatsContent(addedLines: added, removedLines: removed)
+              .equatable()
+          }
+          if let prText {
+            PullRequestBadgeContent(text: prText)
+              .equatable()
+          }
+          if !agents.isEmpty {
+            RunningAgentsBadgeContent(agents: agents)
+              .equatable()
+          }
+          if hasStatus {
+            StatusIndicator(
+              runningScriptColors: scriptColors,
+              showsNotificationIndicator: showsNotificationIndicator,
+              notifications: notifications,
+            )
             .equatable()
+          }
         }
-        if let prText {
-          PullRequestBadgeContent(text: prText)
-            .equatable()
-        }
-        if !agents.isEmpty {
-          RunningAgentsBadgeContent(agents: agents)
-            .equatable()
-        }
-        if hasStatus {
-          StatusIndicator(
-            runningScriptColors: scriptColors,
-            showsNotificationIndicator: showsNotificationIndicator,
-            notifications: notifications,
-          )
-          .equatable()
+        // Title takes the squeeze under narrow widths, not the counters.
+        .fixedSize(horizontal: true, vertical: false)
+        .opacity(hasHint ? 0 : 1)
+        .allowsHitTesting(!hasHint)
+
+        Text(shortcutHint ?? "")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .opacity(hasHint ? 1 : 0)
+      }
+      .animation(.easeInOut(duration: TerminalTabBarMetrics.fadeAnimationDuration), value: hasHint)
+
+      if showsSessionTitles, store.kind == .gitWorktree, store.tabsSummary.tabs.count > 1 {
+        TabListExpander(
+          count: store.tabsSummary.tabs.count,
+          isExpanded: store.isTabListExpanded
+        ) {
+          store.send(.tabListExpansionToggled)
         }
       }
-      // Title takes the squeeze under narrow widths, not the counters.
-      .fixedSize(horizontal: true, vertical: false)
-      .opacity(hasHint ? 0 : 1)
-      .allowsHitTesting(!hasHint)
-
-      Text(shortcutHint ?? "")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .opacity(hasHint ? 1 : 0)
     }
-    .animation(.easeInOut(duration: TerminalTabBarMetrics.fadeAnimationDuration), value: hasHint)
+  }
+}
+
+/// Trailing `count ›` control on a multi-tab row; toggles the per-tab
+/// sub-rows. Equatable so title storms that don't change the count or the
+/// expansion skip this leaf.
+private struct TabListExpander: View, Equatable {
+  let count: Int
+  let isExpanded: Bool
+  let toggle: () -> Void
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.count == rhs.count && lhs.isExpanded == rhs.isExpanded
+  }
+
+  var body: some View {
+    Button(action: toggle) {
+      HStack(spacing: 2) {
+        Text("\(count)")
+          .font(.caption)
+          .monospacedDigit()
+        Image(systemName: "chevron.right")
+          .font(.caption2.weight(.semibold))
+          .rotationEffect(.degrees(isExpanded ? 90 : 0))
+          .animation(.easeInOut(duration: 0.15), value: isExpanded)
+      }
+      .foregroundStyle(.secondary)
+      .contentShape(.interaction, .rect)
+    }
+    .buttonStyle(.plain)
+    .help(isExpanded ? "Collapse session tabs" : "Expand session tabs (\(count))")
+    .accessibilityLabel("\(count) session tabs, \(isExpanded ? "expanded" : "collapsed")")
   }
 }
 

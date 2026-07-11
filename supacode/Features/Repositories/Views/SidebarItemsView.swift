@@ -435,7 +435,86 @@ struct SidebarItemRow: View {
         nestDepth: nestDepth,
         highlightSubtitle: highlightSubtitle
       )
+      SidebarTabSubRows(store: itemStore, parentStore: store, nestDepth: nestDepth)
     }
+  }
+}
+
+/// Per-tab sub-rows under an expanded worktree row. Reads only the leaf's own
+/// scoped store, so a title tick on this worktree invalidates just these rows.
+/// Sub-rows are plain Buttons (mirroring `SidebarPathGroupHeaderRow`), not
+/// List-selection tags: the parent row keeps the selection highlight and the
+/// click routes through `sidebarTabRowSelected`.
+private struct SidebarTabSubRows: View {
+  let store: StoreOf<SidebarItemFeature>
+  @Bindable var parentStore: StoreOf<RepositoriesFeature>
+  let nestDepth: Int
+  @Shared(.sidebarShowsSessionTitles) private var showsSessionTitles: Bool
+
+  var body: some View {
+    if showsSessionTitles, store.state.isTabListExpanded {
+      let summary = store.state.tabsSummary
+      let tabAgents = store.state.tabAgents
+      let rowID = store.state.id
+      ForEach(summary.tabs) { tab in
+        SidebarTabSubRow(
+          tab: tab,
+          agents: tabAgents[tab.id] ?? [],
+          isSelected: tab.id == summary.selectedTabID,
+          nestDepth: nestDepth
+        ) {
+          parentStore.send(.sidebarTabRowSelected(rowID, tabID: tab.id))
+        }
+      }
+    }
+  }
+}
+
+private struct SidebarTabSubRow: View {
+  let tab: WorktreeTabsSummary.Tab
+  /// Agents running in this tab; when non-empty their marks replace the
+  /// generic tab icon so the expanded list mirrors the collapsed row's badges.
+  let agents: [AgentPresenceFeature.AgentInstance]
+  let isSelected: Bool
+  let nestDepth: Int
+  let select: () -> Void
+
+  var body: some View {
+    Button(action: select) {
+      HStack(spacing: 6) {
+        if agents.isEmpty {
+          Image(systemName: tab.icon ?? "terminal")
+            .imageScale(.small)
+            .foregroundStyle(tab.tint.map { AnyShapeStyle($0.color) } ?? AnyShapeStyle(.secondary))
+            .accessibilityHidden(true)
+        } else {
+          AgentAvatarGroupView(instances: agents, size: 14, maxVisible: 2)
+        }
+        Text(tab.title)
+          .font(.callout)
+          .fontWeight(isSelected ? .semibold : .regular)
+          .lineLimit(1)
+          .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 6)
+      .padding(.vertical, 3)
+      .contentShape(.interaction, .rect)
+      // Neutral gray selection pill (the unemphasized system selection color),
+      // deliberately not the accent-colored emphasized one: the parent row
+      // already carries the sidebar's accent highlight.
+      .background(isSelected ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : .clear)
+      .clipShape(.rect(cornerRadius: 5))
+    }
+    .buttonStyle(.plain)
+    // The horizontal padding above eats into the old 22pt indent so the icon
+    // stays aligned; the highlight pill extends 6pt past it on the left.
+    .listRowInsets(.leading, CGFloat(nestDepth) * SidebarNestLayout.indentStep + 16)
+    .listRowInsets(.vertical, 2)
+    .moveDisabled(true)
+    .help("Switch to \(tab.title)")
+    .accessibilityLabel("Session tab \(tab.title)\(isSelected ? ", selected" : "")")
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 }
 
@@ -452,6 +531,7 @@ private struct SidebarItemContainer: View {
   var nestDepth: Int = 0
   var highlightSubtitle: SidebarHighlightRepoTag?
   @Shared(.appStorage("worktreeRowHideSubtitleOnMatch")) private var hideSubtitleOnMatch = true
+  @Shared(.sidebarShowsSessionTitles) private var showsSessionTitles: Bool
 
   var body: some View {
     SidebarItemBody(
@@ -466,7 +546,8 @@ private struct SidebarItemContainer: View {
       displayNameOverride: displayNameOverride,
       nestDepth: nestDepth,
       highlightSubtitle: highlightSubtitle,
-      hideSubtitleOnMatch: hideSubtitleOnMatch
+      hideSubtitleOnMatch: hideSubtitleOnMatch,
+      showsSessionTitles: showsSessionTitles
     )
   }
 }
@@ -484,6 +565,7 @@ private struct SidebarItemBody: View {
   let nestDepth: Int
   let highlightSubtitle: SidebarHighlightRepoTag?
   let hideSubtitleOnMatch: Bool
+  let showsSessionTitles: Bool
 
   var body: some View {
     let rowID = store.state.id
@@ -500,6 +582,7 @@ private struct SidebarItemBody: View {
       hideSubtitle: hideSubtitle,
       hideSubtitleOnMatch: hideSubtitleOnMatch,
       showsPullRequestInfo: !isDragging,
+      showsSessionTitles: showsSessionTitles,
       shortcutHint: shortcutHint,
       displayNameOverride: displayNameOverride,
       nestDepth: nestDepth,

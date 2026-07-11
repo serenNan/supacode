@@ -1345,6 +1345,16 @@ struct AppFeature {
           .send(.agentPresence(.delegate(.surfacesChanged(restoredAddedSurfaces))))
         )
 
+      case .terminalEvent(.worktreeTabsChanged(let worktreeID, let summary)):
+        guard state.repositories.sidebarItems[id: worktreeID] != nil else { return .none }
+        return .send(
+          .repositories(
+            .sidebarItems(
+              .element(id: worktreeID, action: .tabsSnapshotChanged(summary))
+            )
+          )
+        )
+
       case .terminalEvent(.tabProjectionChanged(let worktreeID, let projection)):
         // Resolve tab-new / surface-split acks once the supplied id appears.
         let ackEffect = resolveCommandAcks(ok: true, state: &state) { match in
@@ -1530,6 +1540,21 @@ struct AppFeature {
             .sidebarItems(
               .element(id: rowID, action: .agentSnapshotChanged(agents, hasActivity: hasActivity))
             )
+          )
+        )
+      )
+      // Same snapshot regrouped per tab so the row's expanded sub-rows can
+      // show each tab's own agent mark. Keyed off `terminalTabs` (the live
+      // tab → surfaces map); empty tabs are omitted.
+      var tabAgents: [TerminalTabID: [AgentPresenceFeature.AgentInstance]] = [:]
+      for tab in state.terminals.terminalTabs where tab.worktreeID == rowID {
+        let agentsInTab = presence.agents(across: tab.surfaceIDs, badgesEnabled: badgesEnabled)
+        if !agentsInTab.isEmpty { tabAgents[tab.id] = agentsInTab }
+      }
+      effects.append(
+        .send(
+          .repositories(
+            .sidebarItems(.element(id: rowID, action: .tabAgentsChanged(tabAgents)))
           )
         )
       )
