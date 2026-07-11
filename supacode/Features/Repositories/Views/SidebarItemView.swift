@@ -25,6 +25,10 @@ struct SidebarItemView: View {
   let hideSubtitle: Bool
   let hideSubtitleOnMatch: Bool
   let showsPullRequestInfo: Bool
+  /// Mirror of `@Shared(.sidebarShowsSessionTitles)`: title shows the selected
+  /// tab's title (branch moves to the subtitle) and multi-tab rows grow an
+  /// expander. Git worktree rows only; folders keep the legacy layout.
+  let showsSessionTitles: Bool
   let shortcutHint: String?
   /// Trailing branch-component label injected by the branch-nesting renderer so
   /// a row nested under a `feature/tools` header reads as `a` instead of the
@@ -47,7 +51,8 @@ struct SidebarItemView: View {
       hideSubtitleOnMatch: hideSubtitleOnMatch,
       highlightSubtitle: highlightSubtitle,
       customTitle: store.customTitle,
-      customTint: store.customTint
+      customTint: store.customTint,
+      sessionTitle: showsSessionTitles && store.kind == .gitWorktree ? store.selectedTabTitle : nil
     )
 
     Label {
@@ -65,7 +70,8 @@ struct SidebarItemView: View {
         TrailingView(
           store: store,
           shortcutHint: shortcutHint,
-          showsPullRequestInfo: showsPullRequestInfo
+          showsPullRequestInfo: showsPullRequestInfo,
+          showsSessionTitles: showsSessionTitles
         )
       }
     } icon: {
@@ -111,7 +117,8 @@ struct ResolvedRowDisplay: Equatable {
     hideSubtitleOnMatch: Bool,
     highlightSubtitle: SidebarHighlightRepoTag? = nil,
     customTitle: String? = nil,
-    customTint: RepositoryColor? = nil
+    customTint: RepositoryColor? = nil,
+    sessionTitle: String? = nil
   ) {
     self.accent =
       if isMainWorktree { .main } else if isPinned { .pinned } else { .default }
@@ -130,17 +137,21 @@ struct ResolvedRowDisplay: Equatable {
 
     let resolvedWorktreeName = worktreeName ?? "Default"
     let effectiveWorktreeName = resolvedWorktreeName.isEmpty ? branchName : resolvedWorktreeName
-    self.name = resolvedCustom ?? branchName
+    self.name = resolvedCustom ?? sessionTitle ?? branchName
 
     let branchLastComponent = branchName.split(separator: "/").last.map(String.init) ?? branchName
     let isMatch = effectiveWorktreeName == branchLastComponent
     // Once a user types a custom title, they've lost the visual cue that the auto-derived name was
     // providing, so we always render the subtitle even when it would otherwise collapse on match.
-    let shouldHideOnMatch = hideSubtitleOnMatch && !hasCustomTitle && isMatch
+    // Session mode pins the branch into the subtitle (the title no longer carries
+    // it), so the hide-on-match collapse only applies to the legacy layout.
+    let shouldHideOnMatch = hideSubtitleOnMatch && !hasCustomTitle && isMatch && sessionTitle == nil
 
     if let highlightSubtitle {
       let trail: String?
-      if shouldHideOnMatch {
+      if sessionTitle != nil {
+        trail = branchName
+      } else if shouldHideOnMatch {
         trail = nil
       } else if isMainWorktree {
         trail = "Default"
@@ -160,6 +171,8 @@ struct ResolvedRowDisplay: Equatable {
 
     if hideSubtitle || shouldHideOnMatch {
       self.subtitle = .none
+    } else if sessionTitle != nil {
+      self.subtitle = .plain(branchName)
     } else {
       self.subtitle = .plain(effectiveWorktreeName)
     }
@@ -499,6 +512,7 @@ private struct TrailingView: View {
   let store: StoreOf<SidebarItemFeature>
   let shortcutHint: String?
   let showsPullRequestInfo: Bool
+  let showsSessionTitles: Bool
 
   var body: some View {
     let hasHint = shortcutHint != nil
@@ -517,48 +531,91 @@ private struct TrailingView: View {
     let hasStatus = !scriptColors.isEmpty || showsNotificationIndicator
 
     // Cross-fade via opacity so flipping ⌘ doesn't snap the row.
-    ZStack(alignment: .trailing) {
-      HStack(spacing: 6) {
-        if store.kind == .folder, let host = store.host {
-          Image(systemName: "wifi")
-            .imageScale(.small)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .help(host.displayAuthority)
-            .accessibilityLabel("Remote host \(host.displayAuthority)")
-        }
-        if hasStats {
-          DiffStatsContent(addedLines: added, removedLines: removed)
+    HStack(spacing: 6) {
+      ZStack(alignment: .trailing) {
+        HStack(spacing: 6) {
+          if store.kind == .folder, let host = store.host {
+            Image(systemName: "wifi")
+              .imageScale(.small)
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .help(host.displayAuthority)
+              .accessibilityLabel("Remote host \(host.displayAuthority)")
+          }
+          if hasStats {
+            DiffStatsContent(addedLines: added, removedLines: removed)
+              .equatable()
+          }
+          if let prText {
+            PullRequestBadgeContent(text: prText)
+              .equatable()
+          }
+          if !agents.isEmpty {
+            RunningAgentsBadgeContent(agents: agents)
+              .equatable()
+          }
+          if hasStatus {
+            StatusIndicator(
+              runningScriptColors: scriptColors,
+              showsNotificationIndicator: showsNotificationIndicator,
+              notifications: notifications,
+            )
             .equatable()
+          }
         }
-        if let prText {
-          PullRequestBadgeContent(text: prText)
-            .equatable()
-        }
-        if !agents.isEmpty {
-          RunningAgentsBadgeContent(agents: agents)
-            .equatable()
-        }
-        if hasStatus {
-          StatusIndicator(
-            runningScriptColors: scriptColors,
-            showsNotificationIndicator: showsNotificationIndicator,
-            notifications: notifications,
-          )
-          .equatable()
+        // Title takes the squeeze under narrow widths, not the counters.
+        .fixedSize(horizontal: true, vertical: false)
+        .opacity(hasHint ? 0 : 1)
+        .allowsHitTesting(!hasHint)
+
+        Text(shortcutHint ?? "")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .opacity(hasHint ? 1 : 0)
+      }
+      .animation(.easeInOut(duration: TerminalTabBarMetrics.fadeAnimationDuration), value: hasHint)
+
+      if showsSessionTitles, store.kind == .gitWorktree, store.tabsSummary.tabs.count > 1 {
+        TabListExpander(
+          count: store.tabsSummary.tabs.count,
+          isExpanded: store.isTabListExpanded
+        ) {
+          store.send(.tabListExpansionToggled)
         }
       }
-      // Title takes the squeeze under narrow widths, not the counters.
-      .fixedSize(horizontal: true, vertical: false)
-      .opacity(hasHint ? 0 : 1)
-      .allowsHitTesting(!hasHint)
-
-      Text(shortcutHint ?? "")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .opacity(hasHint ? 1 : 0)
     }
-    .animation(.easeInOut(duration: TerminalTabBarMetrics.fadeAnimationDuration), value: hasHint)
+  }
+}
+
+/// Trailing `count ›` control on a multi-tab row; toggles the per-tab
+/// sub-rows. Equatable so title storms that don't change the count or the
+/// expansion skip this leaf.
+private struct TabListExpander: View, Equatable {
+  let count: Int
+  let isExpanded: Bool
+  let toggle: () -> Void
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.count == rhs.count && lhs.isExpanded == rhs.isExpanded
+  }
+
+  var body: some View {
+    Button(action: toggle) {
+      HStack(spacing: 2) {
+        Text("\(count)")
+          .font(.caption)
+          .monospacedDigit()
+        Image(systemName: "chevron.right")
+          .font(.caption2.weight(.semibold))
+          .rotationEffect(.degrees(isExpanded ? 90 : 0))
+          .animation(.easeInOut(duration: 0.15), value: isExpanded)
+      }
+      .foregroundStyle(.secondary)
+      .contentShape(.interaction, .rect)
+    }
+    .buttonStyle(.plain)
+    .help(isExpanded ? "Collapse session tabs" : "Expand session tabs (\(count))")
+    .accessibilityLabel("\(count) session tabs, \(isExpanded ? "expanded" : "collapsed")")
   }
 }
 

@@ -24,6 +24,9 @@ final class WorktreeTerminalManager {
   /// Per-worktree dedup of `worktreeProjectionChanged`; identical projections
   /// (common on hook storms) are dropped before they hit the AsyncStream.
   private var lastEmittedProjections: [Worktree.ID: WorktreeRowProjection] = [:]
+  /// Per-worktree dedup of `worktreeTabsChanged`; dirty-flag churn and no-op
+  /// title writes produce identical summaries and are dropped here.
+  private var lastEmittedTabsSummaries: [Worktree.ID: WorktreeTabsSummary] = [:]
   private var eventContinuation: AsyncStream<TerminalClient.Event>.Continuation?
   private var pendingEvents: [TerminalClient.Event] = []
   /// Latest-wins events deduped by identity: drops a value equal to the
@@ -84,6 +87,7 @@ final class WorktreeTerminalManager {
   /// piece of state, so an identical repeat is a no-op and is dropped.
   private enum CoalesceKey: Hashable {
     case worktreeProjection(Worktree.ID)
+    case worktreeTabs(Worktree.ID)
     case tabProjection(TerminalTabID)
     case tabProgress(TerminalTabID)
     case taskStatus(Worktree.ID)
@@ -98,6 +102,7 @@ final class WorktreeTerminalManager {
   private static func coalesceKey(for event: TerminalClient.Event) -> CoalesceKey? {
     switch event {
     case .worktreeProjectionChanged(let worktreeID, _): .worktreeProjection(worktreeID)
+    case .worktreeTabsChanged(let worktreeID, _): .worktreeTabs(worktreeID)
     case .tabProjectionChanged(_, let projection): .tabProjection(projection.tabID)
     case .tabProgressDisplayChanged(_, let tabID, _): .tabProgress(tabID)
     case .taskStatusChanged(let worktreeID, _): .taskStatus(worktreeID)
@@ -449,6 +454,7 @@ final class WorktreeTerminalManager {
     // Reset dedup state before replaying so the replay re-seeds both caches; a
     // fresh subscriber then has the latest value recorded for every key.
     lastEmittedProjections.removeAll()
+    lastEmittedTabsSummaries.removeAll()
     lastEmittedCoalescable.removeAll()
     pendingShedProjectionReplays.removeAll()
     if !pendingEvents.isEmpty {
@@ -472,6 +478,9 @@ final class WorktreeTerminalManager {
     // pick up the current snapshot (otherwise they'd stay default until the
     // next mutation).
     for id in states.keys { emitProjection(for: id) }
+    // Seed tab-strip summaries for the same reason: a re-subscribing sidebar
+    // needs the current titles without waiting for the next tab mutation.
+    for id in states.keys { emitTabsSummary(for: id) }
     // Replay per-tab projections / stripe-progress displays for the same reason:
     // a new subscriber needs the existing `terminalTabs[id:]` rows seeded so
     // tab-bar leaves don't render empty until the next per-tab mutation.
@@ -595,6 +604,7 @@ final class WorktreeTerminalManager {
     state.onTabProgressDisplayChanged = { [weak self] tabID, display in
       self?.emit(.tabProgressDisplayChanged(worktreeID: worktree.id, tabID: tabID, display: display))
     }
+    state.onTabsSummaryChanged = { [weak self] in self?.emitTabsSummary(for: worktree.id) }
     states[worktree.id] = state
     terminalLogger.info("Created terminal state for worktree \(worktree.id)")
     return state
@@ -1164,7 +1174,7 @@ final class WorktreeTerminalManager {
     switch event {
     case .tabRemoved(_, let tabID): [.tabProjection(tabID), .tabProgress(tabID)]
     case .worktreeStateTornDown(let worktreeID):
-      [.worktreeProjection(worktreeID), .taskStatus(worktreeID), .focus(worktreeID)]
+      [.worktreeProjection(worktreeID), .worktreeTabs(worktreeID), .taskStatus(worktreeID), .focus(worktreeID)]
     default: []
     }
   }
@@ -1173,6 +1183,7 @@ final class WorktreeTerminalManager {
   /// already cleared the coalesce keys, which this re-clears as a guard against drift.
   private func invalidateCaches(forPrunedWorktree id: Worktree.ID) {
     lastEmittedProjections.removeValue(forKey: id)
+    lastEmittedTabsSummaries.removeValue(forKey: id)
     pendingShedProjectionReplays.remove(id)
     for key in Self.invalidatedCoalesceKeys(by: .worktreeStateTornDown(worktreeID: id)) {
       lastEmittedCoalescable.removeValue(forKey: key)
@@ -1238,5 +1249,20 @@ final class WorktreeTerminalManager {
     // hasAny can only flip when this worktree's surface set actually changed,
     // which `projectionChanged` already implies.
     emitHasAnyTerminalSurfaceIfNeeded()
+  }
+
+  /// Tab-strip mirror of `emitProjection(for:)`: Equatable-diffed against the
+  /// last emitted summary so dirty-flag churn and no-op writes never reach TCA.
+  private func emitTabsSummary(for worktreeID: Worktree.ID) {
+    guard eventContinuation != nil else { return }
+    guard let state = states[worktreeID] else { return }
+    let summary = state.currentTabsSummary()
+    let previous = lastEmittedTabsSummaries[worktreeID]
+    guard previous != summary else { return }
+    // A first emit of an empty strip is a no-op downstream (rows default to
+    // empty), so skip it; a tabs → no-tabs transition still goes through.
+    if previous == nil, summary.tabs.isEmpty { return }
+    lastEmittedTabsSummaries[worktreeID] = summary
+    emit(.worktreeTabsChanged(worktreeID, summary))
   }
 }

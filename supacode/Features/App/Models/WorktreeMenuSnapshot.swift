@@ -103,7 +103,8 @@ extension AppFeature.Action {
         return true
       case .notificationReceived, .tabCreated, .tabClosed, .focusChanged,
         .taskStatusChanged, .blockingScriptCompleted, .commandPaletteToggleRequested,
-        .setupScriptConsumed, .worktreeProjectionChanged, .tabProjectionChanged,
+        .setupScriptConsumed, .worktreeProjectionChanged, .worktreeTabsChanged,
+        .tabProjectionChanged,
         .tabRemoved, .worktreeStateTornDown, .tabProgressDisplayChanged,
         .surfacesClosed, .agentHookEventReceived, .terminalHasAnySurfaceChanged,
         .surfaceCreationFailed:

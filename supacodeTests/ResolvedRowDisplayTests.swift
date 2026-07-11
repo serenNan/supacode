@@ -213,6 +213,74 @@ struct ResolvedRowDisplayTests {
     }
   }
 
+  // MARK: - Session-title mode.
+
+  @Test func sessionTitleTakesOverAndBranchMovesToSubtitle() {
+    let resolved = ResolvedRowDisplay(
+      kind: .gitWorktree,
+      branchName: "feature/login",
+      worktreeName: "login",
+      isMainWorktree: false,
+      isPinned: false,
+      hideSubtitle: false,
+      hideSubtitleOnMatch: true,
+      sessionTitle: "✳ Claude Code"
+    )
+    #expect(resolved.name == "✳ Claude Code")
+    #expect(resolved.subtitle == .plain("feature/login"))
+  }
+
+  @Test func customTitleStillBeatsSessionTitle() {
+    let resolved = ResolvedRowDisplay(
+      kind: .gitWorktree,
+      branchName: "main",
+      worktreeName: nil,
+      isMainWorktree: true,
+      isPinned: false,
+      hideSubtitle: false,
+      hideSubtitleOnMatch: false,
+      customTitle: "My Repo",
+      sessionTitle: "✳ Claude Code"
+    )
+    #expect(resolved.name == "My Repo")
+    #expect(resolved.subtitle == .plain("main"))
+  }
+
+  @Test func sessionTitleHighlightSubtitleTrailsBranch() {
+    let resolved = ResolvedRowDisplay(
+      kind: .gitWorktree,
+      branchName: "main",
+      worktreeName: nil,
+      isMainWorktree: true,
+      isPinned: false,
+      hideSubtitle: false,
+      hideSubtitleOnMatch: false,
+      highlightSubtitle: SidebarHighlightRepoTag(repoName: "supacode", repoColor: nil, hostInfo: nil),
+      sessionTitle: "✳ Claude Code"
+    )
+    #expect(resolved.name == "✳ Claude Code")
+    #expect(
+      resolved.subtitle
+        == .highlight(repo: "supacode", repoColor: nil, trail: "main", hostInfo: nil)
+    )
+  }
+
+  @Test func nilSessionTitleKeepsLegacyBehavior() {
+    let resolved = ResolvedRowDisplay(
+      kind: .gitWorktree,
+      branchName: "feature/login",
+      worktreeName: "login",
+      isMainWorktree: false,
+      isPinned: false,
+      hideSubtitle: false,
+      hideSubtitleOnMatch: true,
+      sessionTitle: nil
+    )
+    #expect(resolved.name == "feature/login")
+    // hide-on-match still collapses: worktree name matches branch last component.
+    #expect(resolved.subtitle == .none)
+  }
+
   // MARK: - Accent resolution.
 
   @Test func accentIsMainForMainWorktreeRegardlessOfPin() {

@@ -317,6 +317,9 @@ struct RepositoriesFeature {
       roots: [URL]
     )
     case selectWorktree(Worktree.ID?, focusTerminal: Bool = false)
+    /// A per-tab sub-row in the sidebar was clicked: select the worktree, then
+    /// route the tab selection through the existing delegate → TerminalClient path.
+    case sidebarTabRowSelected(Worktree.ID, tabID: TerminalTabID)
     case selectWorktreeAtHotkeySlot(Int)
     case selectNextWorktree
     case selectPreviousWorktree
@@ -4017,6 +4020,12 @@ struct RepositoriesFeature {
         return .merge(
           .send(.selectWorktree(worktreeID, focusTerminal: true)),
           .send(.delegate(.selectTerminalTab(worktreeID, tabId: tabId)))
+        )
+
+      case .sidebarTabRowSelected(let worktreeID, let tabID):
+        return .merge(
+          .send(.selectWorktree(worktreeID, focusTerminal: true)),
+          .send(.delegate(.selectTerminalTab(worktreeID, tabId: tabID)))
         )
 
       case .alert(.dismiss):

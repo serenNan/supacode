@@ -365,8 +365,11 @@ extension SidebarItemFeature.Action {
       return .all
     case .pullRequestChanged:
       return .selectedWorktreeSlice
+    // Tabs live only on the leaf (title / sub-rows render off the scoped
+    // store), so title storms never touch the structure caches.
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
+      .tabsSnapshotChanged, .tabListExpansionToggled,
       .focusTerminalRequested, .focusTerminalConsumed:
       return []
     }
@@ -502,6 +505,9 @@ extension RepositoriesFeature.Action {
       .setAutoDeleteArchivedWorktreesAfterDays,
       .setMoveNotifiedWorktreeToTop,
       .pullRequestAction,
+      // Pure effect launcher: fans out to `.selectWorktree` (which declares
+      // its own slice invalidation) and the tab-selection delegate.
+      .sidebarTabRowSelected,
       .showToast, .dismissToast,
       .toggleInspectorPane, .setInspectorPresented,
       .delayedPullRequestRefresh,

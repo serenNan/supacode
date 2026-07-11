@@ -173,4 +173,12 @@ nonisolated extension SharedReaderKey where Self == AppStorageKey<Bool>.Default 
   static var sidebarGroupActiveRows: Self {
     Self[.appStorage("sidebarGroupActiveRows"), default: true]
   }
+
+  /// "Show Session Titles" view-menu toggle. When on, a worktree row's title
+  /// shows the selected terminal tab's title (branch name moves to the
+  /// subtitle) and multi-tab rows can expand into per-tab sub-rows. Off
+  /// restores the branch-name-first rows exactly.
+  static var sidebarShowsSessionTitles: Self {
+    Self[.appStorage("sidebarShowsSessionTitles"), default: true]
+  }
 }

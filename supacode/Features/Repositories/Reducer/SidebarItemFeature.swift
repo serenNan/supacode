@@ -109,6 +109,12 @@ struct SidebarItemFeature {
     /// `surfaceIDs == []` (user closed every tab) doesn't re-seed dead UUIDs
     /// from the last-quit layout snapshot.
     var hasTerminalProjection: Bool = false
+    /// Mirror of the worktree's terminal tab strip; the sole populator is
+    /// `tabsSnapshotChanged`, fed from `TerminalClient.Event.worktreeTabsChanged`.
+    var tabsSummary: WorktreeTabsSummary = WorktreeTabsSummary()
+    /// Whether the row's per-tab sub-rows are expanded. In-memory only: tabs are
+    /// runtime entities, so the expansion doesn't persist across relaunch.
+    var isTabListExpanded: Bool = false
     /// Ghostty progress busy on any surface. Combined with `hasAgentActivity` for shimmer.
     var isProgressBusy: Bool = false
     var hasUnseenNotifications: Bool = false
@@ -128,6 +134,8 @@ struct SidebarItemFeature {
     case pullRequestChanged(GithubPullRequest?, branchAtQueryTime: String)
     case agentSnapshotChanged([AgentPresenceFeature.AgentInstance], hasActivity: Bool)
     case terminalProjectionChanged(WorktreeRowProjection)
+    case tabsSnapshotChanged(WorktreeTabsSummary)
+    case tabListExpansionToggled
     case dragSessionChanged(isDragging: Bool)
     case focusTerminalRequested
     case focusTerminalConsumed
@@ -186,6 +194,19 @@ struct SidebarItemFeature {
         }
         return .none
 
+      case .tabsSnapshotChanged(let summary):
+        if state.tabsSummary != summary { state.tabsSummary = summary }
+        // A row that fell to 0/1 tabs has nothing to expand; reset so a later
+        // multi-tab state starts collapsed.
+        if summary.tabs.count <= 1, state.isTabListExpanded {
+          state.isTabListExpanded = false
+        }
+        return .none
+
+      case .tabListExpansionToggled:
+        state.isTabListExpanded.toggle()
+        return .none
+
       case .dragSessionChanged(let isDragging):
         guard state.isDragging != isDragging else { return .none }
         state.isDragging = isDragging
@@ -219,6 +240,16 @@ extension SidebarItemFeature.State {
   /// views stay in lock-step on the empty / whitespace fallback rule.
   var resolvedSidebarTitle: String? {
     SidebarDisplayName.resolved(custom: customTitle, fallback: sidebarDisplayName)
+  }
+  /// Display title of the currently selected terminal tab, or nil when the
+  /// worktree has no live tab / the title is blank. Views layer this between
+  /// the user's custom title and the branch-name fallback.
+  var selectedTabTitle: String? {
+    guard let selectedID = tabsSummary.selectedTabID,
+      let tab = tabsSummary.tabs.first(where: { $0.id == selectedID })
+    else { return nil }
+    let trimmed = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
   var accent: WorktreeAccent { WorktreeAccent.derive(isMainWorktree: isMainWorktree, isPinned: isPinned) }
   /// True iff any tracked agent on this row is awaiting user input.
@@ -276,6 +307,22 @@ struct WorktreeRowProjection: Equatable, Sendable {
   /// Terminal-tracked user scripts; the sole populator of the row's
   /// `runningScripts`, so the dropdown can't drift from process state (#573).
   var runningScripts: IdentifiedArrayOf<SidebarItemFeature.State.RunningScript> = []
+}
+
+/// Per-worktree snapshot of the terminal tab strip (titles / icons / selected
+/// tab), emitted separately from `WorktreeRowProjection` so title storms never
+/// touch the sidebar-structure recompute path. Consumed by
+/// `SidebarItemFeature.tabsSnapshotChanged`.
+struct WorktreeTabsSummary: Equatable, Sendable {
+  struct Tab: Equatable, Identifiable, Sendable {
+    let id: TerminalTabID
+    let title: String
+    let icon: String?
+    let tint: RepositoryColor?
+  }
+
+  var tabs: [Tab] = []
+  var selectedTabID: TerminalTabID?
 }
 
 /// Value-typed projection of the focused row's display fields, cached on

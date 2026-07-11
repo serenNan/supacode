@@ -2997,6 +2997,23 @@ struct RepositoriesFeatureTests {
     await store.receive(\.delegate.selectedWorktreeChanged)
   }
 
+  @Test(.dependencies) func sidebarTabRowSelectionSelectsWorktreeAndDelegates() async {
+    let repoRoot = "/tmp/\(UUID().uuidString)-repo"
+    let worktree = makeWorktree(id: "\(repoRoot)/feature", name: "feature", repoRoot: repoRoot)
+    let repository = makeRepository(id: repoRoot, worktrees: [worktree])
+    let tabId = TerminalTabID()
+    var state = makeState(repositories: [repository])
+    state.reconcileSidebarForTesting()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.sidebarTabRowSelected(worktree.id, tabID: tabId))
+    await store.receive(\.selectWorktree)
+    await store.receive(\.delegate.selectTerminalTab)
+  }
+
   @Test(.dependencies) func archiveScriptFailureWithTabIdShowsViewTerminalButton() async {
     let repoRoot = "/tmp/repo"
     let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)

@@ -1345,6 +1345,16 @@ struct AppFeature {
           .send(.agentPresence(.delegate(.surfacesChanged(restoredAddedSurfaces))))
         )
 
+      case .terminalEvent(.worktreeTabsChanged(let worktreeID, let summary)):
+        guard state.repositories.sidebarItems[id: worktreeID] != nil else { return .none }
+        return .send(
+          .repositories(
+            .sidebarItems(
+              .element(id: worktreeID, action: .tabsSnapshotChanged(summary))
+            )
+          )
+        )
+
       case .terminalEvent(.tabProjectionChanged(let worktreeID, let projection)):
         // Resolve tab-new / surface-split acks once the supplied id appears.
         let ackEffect = resolveCommandAcks(ok: true, state: &state) { match in

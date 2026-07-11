@@ -15,6 +15,7 @@ struct SidebarCommands: Commands {
   private var nestedOnboardingDismissedAt: Date = .distantPast
   @Shared(.sidebarGroupPinnedRows) private var groupPinnedRows: Bool
   @Shared(.sidebarGroupActiveRows) private var groupActiveRows: Bool
+  @Shared(.sidebarShowsSessionTitles) private var showsSessionTitles: Bool
   @Shared(.appStorage("highlightRelevantOnboardingDismissedAt"))
   private var highlightOnboardingDismissedAt: Date = .distantPast
 
@@ -131,6 +132,7 @@ struct SidebarCommands: Commands {
           Toggle("Group Active Rows", isOn: groupActiveRowsToggle)
         }
         Toggle("Nest Worktrees by Branch", isOn: nestWorktreesToggle)
+        Toggle("Show Session Titles", isOn: Binding($showsSessionTitles))
         Toggle("Hide Worktree Name on Match", isOn: Binding($hideSubtitleOnMatch))
       }
     }
