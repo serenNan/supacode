@@ -105,7 +105,7 @@ extension GitClient {
     )
   }
 
-  private nonisolated static func parseNumstat(_ output: String) -> [GitCommitFileChange] {
+  nonisolated static func parseNumstat(_ output: String) -> [GitCommitFileChange] {
     output
       .split(whereSeparator: \.isNewline)
       .compactMap { line in

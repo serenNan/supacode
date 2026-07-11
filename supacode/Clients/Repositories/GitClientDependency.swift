@@ -60,6 +60,7 @@ struct GitClientDependency: Sendable {
   var lineChanges: @Sendable (URL) async -> (added: Int, removed: Int)?
   var commitHistory: @Sendable (_ worktreeURL: URL, _ limit: Int) async throws -> GitHistorySnapshot
   var commitDetail: @Sendable (_ worktreeURL: URL, _ hash: String) async throws -> GitCommitDetail
+  var uncommittedFiles: @Sendable (_ worktreeURL: URL) async throws -> [GitCommitFileChange]
   var remoteNames: @Sendable (_ repoRoot: URL) async throws -> [String]
   var fetchRemote: @Sendable (_ remote: String, _ repoRoot: URL) async throws -> Void
   var remoteInfo: @Sendable (_ repositoryRoot: URL) async -> GithubRemoteInfo?
@@ -145,6 +146,9 @@ extension GitClientDependency: DependencyKey {
       },
       commitDetail: { worktreeURL, hash in
         try await GitClient(shell: shell).commitDetail(at: worktreeURL, hash: hash)
+      },
+      uncommittedFiles: { worktreeURL in
+        try await GitClient(shell: shell).uncommittedChanges(at: worktreeURL)
       },
       remoteNames: { try await GitClient(shell: shell).remoteNames(for: $0) },
       fetchRemote: { remote, repoRoot in try await GitClient(shell: shell).fetchRemote(remote, for: repoRoot) },

@@ -328,4 +328,30 @@ struct GitClientCommitHistoryTests {
     #expect(showCall?.contains(hash) == true)
     #expect(showCall?.contains("--numstat") == true)
   }
+
+  @Test func uncommittedChangesRunsDiffNumstat() async throws {
+    let store = CommitHistoryShellCallStore()
+    let output = "12\t3\tsupacode/App/A.swift\n-\t-\tAssets/icon.png\n"
+    let shell = ShellClient(
+      run: { _, arguments, _ in
+        await store.record(arguments)
+        return ShellOutput(stdout: output, stderr: "", exitCode: 0)
+      },
+      runLoginImpl: { _, _, _, _ in ShellOutput(stdout: "", stderr: "", exitCode: 0) }
+    )
+    let client = GitClient(shell: shell)
+
+    let files = try await client.uncommittedChanges(at: URL(fileURLWithPath: "/tmp/repo"))
+
+    #expect(
+      files == [
+        GitCommitFileChange(path: "supacode/App/A.swift", added: 12, removed: 3),
+        GitCommitFileChange(path: "Assets/icon.png", added: nil, removed: nil),
+      ]
+    )
+    let calls = await store.calls
+    let diffCall = calls.first { $0.contains("diff") }
+    #expect(diffCall?.contains("HEAD") == true)
+    #expect(diffCall?.contains("--numstat") == true)
+  }
 }

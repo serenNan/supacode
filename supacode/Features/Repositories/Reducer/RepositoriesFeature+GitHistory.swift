@@ -4,6 +4,7 @@ import Foundation
 private nonisolated enum GitHistoryCancelID: Hashable {
   case load
   case detail
+  case uncommittedFiles
 }
 
 extension RepositoriesFeature {
@@ -23,6 +24,9 @@ extension RepositoriesFeature {
     /// no extra git calls.
     var uncommittedAdded: Int?
     var uncommittedRemoved: Int?
+    var isUncommittedExpanded = false
+    var uncommittedFiles: [GitCommitFileChange]?
+    var uncommittedFilesError: String?
   }
 
   @CasePathable
@@ -33,6 +37,9 @@ extension RepositoriesFeature {
     case commitTapped(hash: String)
     case detailLoaded(worktreeID: Worktree.ID, hash: String, GitCommitDetail)
     case detailFailed(worktreeID: Worktree.ID, hash: String, message: String)
+    case uncommittedTapped
+    case uncommittedFilesLoaded(worktreeID: Worktree.ID, [GitCommitFileChange])
+    case uncommittedFilesFailed(worktreeID: Worktree.ID, message: String)
   }
 
   static let gitHistoryCommitLimit = 200
@@ -70,6 +77,9 @@ extension RepositoriesFeature {
         history.expandedCommitHash = isCollapse ? nil : hash
         history.expandedDetail = nil
         history.detailError = nil
+        history.isUncommittedExpanded = false
+        history.uncommittedFiles = nil
+        history.uncommittedFilesError = nil
         state.gitHistory = history
         if isCollapse {
           return .cancel(id: GitHistoryCancelID.detail)
@@ -108,6 +118,46 @@ extension RepositoriesFeature {
         state.gitHistory?.detailError = message
         return .none
 
+      case .gitHistory(.uncommittedTapped):
+        guard var history = state.gitHistory,
+          let worktree = state.worktree(for: history.worktreeID)
+        else {
+          return .none
+        }
+        let isCollapse = history.isUncommittedExpanded
+        history.isUncommittedExpanded = !isCollapse
+        history.uncommittedFiles = nil
+        history.uncommittedFilesError = nil
+        history.expandedCommitHash = nil
+        history.expandedDetail = nil
+        history.detailError = nil
+        state.gitHistory = history
+        if isCollapse {
+          return .cancel(id: GitHistoryCancelID.uncommittedFiles)
+        }
+        return .merge(
+          .cancel(id: GitHistoryCancelID.detail),
+          loadUncommittedFiles(worktree: worktree)
+        )
+
+      case .gitHistory(.uncommittedFilesLoaded(let worktreeID, let files)):
+        guard state.gitHistory?.worktreeID == worktreeID,
+          state.gitHistory?.isUncommittedExpanded == true
+        else {
+          return .none
+        }
+        state.gitHistory?.uncommittedFiles = files
+        return .none
+
+      case .gitHistory(.uncommittedFilesFailed(let worktreeID, let message)):
+        guard state.gitHistory?.worktreeID == worktreeID,
+          state.gitHistory?.isUncommittedExpanded == true
+        else {
+          return .none
+        }
+        state.gitHistory?.uncommittedFilesError = message
+        return .none
+
       case .sidebarItems(
         .element(id: let worktreeID, action: .diffStatsChanged(let added, let removed))):
         guard state.gitHistory?.worktreeID == worktreeID else { return .none }
@@ -136,7 +186,8 @@ extension RepositoriesFeature {
           state.gitHistory = nil
           return .merge(
             .cancel(id: GitHistoryCancelID.load),
-            .cancel(id: GitHistoryCancelID.detail)
+            .cancel(id: GitHistoryCancelID.detail),
+            .cancel(id: GitHistoryCancelID.uncommittedFiles)
           )
         }
         guard state.gitHistory?.worktreeID != worktree.id else { return .none }
@@ -159,7 +210,7 @@ extension RepositoriesFeature {
     let client = historyGitClient(for: worktree)
     let worktreeURL = worktree.workingDirectory
     let worktreeID = worktree.id
-    return .run { send in
+    let loadEffect: Effect<Action> = .run { send in
       do {
         let snapshot = try await client.commitHistory(worktreeURL, Self.gitHistoryCommitLimit)
         await send(.gitHistory(.loaded(worktreeID: worktreeID, snapshot)))
@@ -168,6 +219,27 @@ extension RepositoriesFeature {
       }
     }
     .cancellable(id: GitHistoryCancelID.load, cancelInFlight: true)
+    // An expanded uncommitted node tracks the same refresh triggers as the list,
+    // so its file breakdown never goes stale behind the +/- counts.
+    guard state.gitHistory?.isUncommittedExpanded == true else { return loadEffect }
+    return .merge(loadEffect, loadUncommittedFiles(worktree: worktree))
+  }
+
+  private func loadUncommittedFiles(worktree: Worktree) -> Effect<Action> {
+    let client = historyGitClient(for: worktree)
+    let worktreeURL = worktree.workingDirectory
+    let worktreeID = worktree.id
+    return .run { send in
+      do {
+        let files = try await client.uncommittedFiles(worktreeURL)
+        await send(.gitHistory(.uncommittedFilesLoaded(worktreeID: worktreeID, files)))
+      } catch {
+        await send(
+          .gitHistory(
+            .uncommittedFilesFailed(worktreeID: worktreeID, message: error.localizedDescription)))
+      }
+    }
+    .cancellable(id: GitHistoryCancelID.uncommittedFiles, cancelInFlight: true)
   }
 
   /// Host-aware flavor mirroring the main file's private `gitClient(for:)`:

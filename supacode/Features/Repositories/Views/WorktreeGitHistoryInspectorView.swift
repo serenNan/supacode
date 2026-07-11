@@ -102,7 +102,11 @@ private struct GitHistoryList: View {
           Section {
             UncommittedChangesRow(
               added: history.uncommittedAdded ?? 0,
-              removed: history.uncommittedRemoved ?? 0
+              removed: history.uncommittedRemoved ?? 0,
+              isExpanded: history.isUncommittedExpanded,
+              files: history.uncommittedFiles,
+              filesError: history.uncommittedFilesError,
+              onTap: { repositoriesStore.send(.gitHistory(.uncommittedTapped)) }
             )
           }
         }
@@ -149,19 +153,81 @@ private struct GitHistoryList: View {
 private struct UncommittedChangesRow: View {
   let added: Int
   let removed: Int
+  let isExpanded: Bool
+  let files: [GitCommitFileChange]?
+  let filesError: String?
+  let onTap: () -> Void
 
   var body: some View {
-    HStack(spacing: 10) {
-      Circle()
-        .strokeBorder(.secondary, lineWidth: 1.5)
-        .frame(width: 9, height: 9)
-        .accessibilityHidden(true)
-      Text("Uncommitted Changes")
-        .font(.callout.weight(.medium))
-      Spacer()
-      DiffStatText(added: added, removed: removed)
+    VStack(alignment: .leading, spacing: 0) {
+      Button(action: onTap) {
+        HStack(spacing: 10) {
+          Circle()
+            .strokeBorder(.secondary, lineWidth: 1.5)
+            .frame(width: 9, height: 9)
+            .accessibilityHidden(true)
+          Text("Uncommitted Changes")
+            .font(.callout.weight(.medium))
+          Spacer()
+          DiffStatText(added: added, removed: removed)
+        }
+        .contentShape(.rect)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .buttonStyle(.plain)
+      .help("Show changed files.")
+
+      if isExpanded {
+        Group {
+          if let files {
+            GitFileChangeList(files: files)
+          } else if let filesError {
+            Label(filesError, systemImage: "exclamationmark.triangle")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else {
+            ProgressView()
+              .controlSize(.small)
+          }
+        }
+        .padding(.top, 6)
+        .padding(.leading, 19)
+      }
     }
     .accessibilityElement(children: .combine)
+  }
+}
+
+private struct GitFileChangeList: View {
+  let files: [GitCommitFileChange]
+
+  var body: some View {
+    if files.isEmpty {
+      Text("No tracked changes.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    } else {
+      VStack(alignment: .leading, spacing: 3) {
+        ForEach(files) { file in
+          HStack(spacing: 6) {
+            Text(file.path)
+              .font(.caption)
+              .monospaced()
+              .lineLimit(1)
+              .truncationMode(.middle)
+              .help(file.path)
+            Spacer(minLength: 4)
+            if let added = file.added, let removed = file.removed {
+              DiffStatText(added: added, removed: removed)
+            } else {
+              Text("binary")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -303,26 +369,7 @@ private struct GitCommitDetailView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         if !detail.files.isEmpty {
-          VStack(alignment: .leading, spacing: 3) {
-            ForEach(detail.files) { file in
-              HStack(spacing: 6) {
-                Text(file.path)
-                  .font(.caption)
-                  .monospaced()
-                  .lineLimit(1)
-                  .truncationMode(.middle)
-                  .help(file.path)
-                Spacer(minLength: 4)
-                if let added = file.added, let removed = file.removed {
-                  DiffStatText(added: added, removed: removed)
-                } else {
-                  Text("binary")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                }
-              }
-            }
-          }
+          GitFileChangeList(files: detail.files)
         }
       } else if let detailError {
         Label(detailError, systemImage: "exclamationmark.triangle")

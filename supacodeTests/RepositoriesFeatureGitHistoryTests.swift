@@ -355,6 +355,114 @@ struct RepositoriesFeatureGitHistoryTests {
     }
   }
 
+  @Test func uncommittedTapExpandsLoadsFilesAndCollapses() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    let files = [GitCommitFileChange(path: "README.md", added: 5, removed: 1)]
+    var initialState = makeState(repositories: [repository], selection: .worktree(worktree.id))
+    initialState.inspectorPane = .history
+    initialState.inspectorPresented = true
+    initialState.gitHistory = RepositoriesFeature.GitHistoryState(
+      worktreeID: worktree.id, snapshot: makeSnapshot())
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+      $0.gitClient.uncommittedFiles = { _ in files }
+    }
+
+    await store.send(.gitHistory(.uncommittedTapped)) {
+      $0.gitHistory?.isUncommittedExpanded = true
+    }
+    await store.receive(\.gitHistory.uncommittedFilesLoaded) {
+      $0.gitHistory?.uncommittedFiles = files
+    }
+    await store.send(.gitHistory(.uncommittedTapped)) {
+      $0.gitHistory?.isUncommittedExpanded = false
+      $0.gitHistory?.uncommittedFiles = nil
+    }
+  }
+
+  @Test func expandingCommitCollapsesUncommittedAndViceVersa() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    let files = [GitCommitFileChange(path: "README.md", added: 5, removed: 1)]
+    let detail = makeDetail(hash: Self.hash1)
+    var initialState = makeState(repositories: [repository], selection: .worktree(worktree.id))
+    initialState.inspectorPane = .history
+    initialState.inspectorPresented = true
+    initialState.gitHistory = RepositoriesFeature.GitHistoryState(
+      worktreeID: worktree.id, snapshot: makeSnapshot())
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+      $0.gitClient.uncommittedFiles = { _ in files }
+      $0.gitClient.commitDetail = { _, _ in detail }
+    }
+
+    await store.send(.gitHistory(.uncommittedTapped)) {
+      $0.gitHistory?.isUncommittedExpanded = true
+    }
+    await store.receive(\.gitHistory.uncommittedFilesLoaded) {
+      $0.gitHistory?.uncommittedFiles = files
+    }
+
+    // Expanding a commit closes the uncommitted node.
+    await store.send(.gitHistory(.commitTapped(hash: Self.hash1))) {
+      $0.gitHistory?.expandedCommitHash = Self.hash1
+      $0.gitHistory?.isUncommittedExpanded = false
+      $0.gitHistory?.uncommittedFiles = nil
+    }
+    await store.receive(\.gitHistory.detailLoaded) {
+      $0.gitHistory?.expandedDetail = detail
+    }
+
+    // Expanding the uncommitted node closes the commit.
+    await store.send(.gitHistory(.uncommittedTapped)) {
+      $0.gitHistory?.isUncommittedExpanded = true
+      $0.gitHistory?.expandedCommitHash = nil
+      $0.gitHistory?.expandedDetail = nil
+    }
+    await store.receive(\.gitHistory.uncommittedFilesLoaded) {
+      $0.gitHistory?.uncommittedFiles = files
+    }
+  }
+
+  @Test func watcherRefreshReloadsExpandedUncommittedFiles() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    let refreshedFiles = [GitCommitFileChange(path: "New.swift", added: 9, removed: 0)]
+    let refreshed = makeSnapshot(subject: "feat: refreshed")
+    var initialState = makeState(repositories: [repository], selection: .worktree(worktree.id))
+    initialState.inspectorPane = .history
+    initialState.inspectorPresented = true
+    var history = RepositoriesFeature.GitHistoryState(
+      worktreeID: worktree.id, snapshot: makeSnapshot())
+    history.isUncommittedExpanded = true
+    history.uncommittedFiles = [GitCommitFileChange(path: "Old.swift", added: 1, removed: 1)]
+    initialState.gitHistory = history
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+      $0.gitClient.lineChanges = { _ in nil }
+      $0.gitClient.commitHistory = { _, _ in refreshed }
+      $0.gitClient.uncommittedFiles = { _ in refreshedFiles }
+    }
+
+    await store.send(.worktreeInfoEvent(.filesChanged(worktreeID: worktree.id))) {
+      $0.gitHistory?.isLoading = true
+    }
+    await store.receive(\.gitHistory.loaded) {
+      $0.gitHistory?.isLoading = false
+      $0.gitHistory?.snapshot = refreshed
+    }
+    await store.receive(\.gitHistory.uncommittedFilesLoaded) {
+      $0.gitHistory?.uncommittedFiles = refreshedFiles
+    }
+  }
+
   @Test func closingInspectorClearsHistory() async {
     let worktree = makeWorktree(id: "/tmp/repo/wt1", name: "wt1")
     let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])

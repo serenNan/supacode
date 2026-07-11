@@ -989,6 +989,17 @@ struct GitClient {
     return detail
   }
 
+  /// Per-file numstat of the working tree's uncommitted changes (vs HEAD).
+  /// Untracked files are not included, matching the sidebar's +/- counts.
+  nonisolated func uncommittedChanges(at worktreeURL: URL) async throws -> [GitCommitFileChange] {
+    let path = worktreeURL.path(percentEncoded: false)
+    let output = try await runGit(
+      operation: .lineChanges,
+      arguments: ["-C", path, "diff", "HEAD", "--numstat"]
+    )
+    return Self.parseNumstat(output)
+  }
+
   nonisolated private func isWorktreeIndexLocked(_ worktreeURL: URL) async -> Bool {
     let headURL = await MainActor.run {
       GitWorktreeHeadResolver.headURL(
