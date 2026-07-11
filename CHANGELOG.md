@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-07-11 通知面板标题改为会话（tab）名
+- 通知落库时记录所属 tab（WorktreeTerminalNotification.tabID），通知 inspector 里 agent 通知的标题从统一的 "Claude Code" 改为该通知所在标签页的实时标题，Claude Code `/rename` 或手动改 tab 名后已有通知行会跟着更新
+- 实现：ToolbarNotificationWorktreeGroup 增加 tabTitles（只收录被通知引用的 tab，Equatable diff 对无关 tab 的标题风暴免疫）；tabsSnapshotChanged 的 cacheInvalidations 加 .toolbarNotificationGroups
+- 兜底：tab 已关/标题空白回退 agent 显示名；tab 标题是裸进程名 "claude" 时映射回 "Claude Code"；非 agent 通知保留原始标题
+- 新增 4 个测试（分组解析 / 无关标题变更不改分组 / 缓存失效映射 / 落库记 tabID）；此改动并入 #630 通知面板 PR 范围（提 PR 时从 upstream/main 切分支 cherry-pick，勿带 CHANGELOG）
+
 ## 2026-07-11 侧边栏会话子行完善（agent 图标 + 整行点击展开）
 - agent 出勤扇出按 tab 重分组（AppFeature.agentSnapshotEffects → 新 action tabAgentsChanged → SidebarItemFeature.State.tabAgents），展开的子行左侧图标换成该 tab 内运行 agent 的徽章（AgentAvatarGroupView，等待输入反色保留），无 agent 的 tab 保持默认图标；展开时父行聚合 agent 徽章隐藏，收起恢复
 - 行标题区（不含行尾控件）加 simultaneousGesture 点击切换子行展开/收起，⌘/⇧ 多选点击跳过，chevron 按钮保留为显式控件

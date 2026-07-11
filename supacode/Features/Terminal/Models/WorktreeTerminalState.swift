@@ -2145,9 +2145,11 @@ final class WorktreeTerminalState {
     let isViewed = isViewedSurface(surfaceID)
     if notificationsEnabled {
       removeNotifications(inTabContaining: surfaceID)
+      let tabId = tabID(containing: surfaceID)
       notifications.insert(
         WorktreeTerminalNotification(
           surfaceID: surfaceID,
+          tabID: tabId,
           title: trimmedTitle,
           body: trimmedBody,
           createdAt: now,
@@ -2156,7 +2158,7 @@ final class WorktreeTerminalState {
         at: 0
       )
       refreshSurfaceUnseenFlag(surfaceID)
-      if let tabId = tabID(containing: surfaceID) {
+      if let tabId {
         emitTabProjection(for: tabId)
       }
       emitNotificationStateChanged()

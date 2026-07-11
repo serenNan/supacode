@@ -38,6 +38,17 @@ struct ToolbarNotificationWorktreeGroup: Identifiable, Equatable {
   let name: String
   let notifications: [WorktreeTerminalNotification]
   let hasUnseenNotifications: Bool
+  /// Live tab titles for the tabs referenced by `notifications`, resolved from
+  /// the row's `tabsSummary` so a notification row can show the session name
+  /// and track renames. Only referenced tabs are included, keeping the
+  /// Equatable diff blind to title churn on unrelated tabs.
+  var tabTitles: [TerminalTabID: String] = [:]
+
+  /// Display title for a notification: the live title of its tab, or nil when
+  /// the tab is gone / untitled (callers fall back to the agent name).
+  func sessionTitle(for notification: WorktreeTerminalNotification) -> String? {
+    notification.tabID.flatMap { tabTitles[$0] }
+  }
 }
 
 extension RepositoriesFeature.State {
@@ -73,7 +84,10 @@ extension RepositoriesFeature.State {
             id: worktree.id,
             name: row.resolvedSidebarTitle ?? worktree.name,
             notifications: Array(row.notifications),
-            hasUnseenNotifications: row.hasUnseenNotifications
+            hasUnseenNotifications: row.hasUnseenNotifications,
+            tabTitles: Self.notificationTabTitles(
+              notifications: row.notifications, tabs: row.tabsSummary.tabs
+            )
           )
         }
 
@@ -100,5 +114,24 @@ extension RepositoriesFeature.State {
     }
 
     return groups
+  }
+
+  /// Titles for the tabs the notifications point at, trimmed; blank titles are
+  /// dropped so consumers fall back to the agent name instead of showing an
+  /// empty headline.
+  private static func notificationTabTitles(
+    notifications: IdentifiedArrayOf<WorktreeTerminalNotification>,
+    tabs: [WorktreeTabsSummary.Tab]
+  ) -> [TerminalTabID: String] {
+    let referencedTabIDs = Set(notifications.compactMap(\.tabID))
+    guard !referencedTabIDs.isEmpty else { return [:] }
+    var titles: [TerminalTabID: String] = [:]
+    for tab in tabs where referencedTabIDs.contains(tab.id) {
+      let trimmed = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        titles[tab.id] = trimmed
+      }
+    }
+    return titles
   }
 }

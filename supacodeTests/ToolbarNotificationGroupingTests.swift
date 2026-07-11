@@ -288,6 +288,92 @@ struct ToolbarNotificationGroupingTests {
     #expect(groups.first?.unseenWorktreeCount == 1)
   }
 
+  @Test func resolvesSessionTitlesForNotificationTabs() {
+    let repoPath = "/tmp/repo-sessions"
+    let main = makeWorktree(id: repoPath, name: "main", repoRoot: repoPath)
+    let feature = makeWorktree(id: "\(repoPath)/feature", name: "feature", repoRoot: repoPath)
+    let repo = makeRepository(id: repoPath, name: "Repo", worktrees: [main, feature])
+    var state = RepositoriesFeature.State(reconciledRepositories: [repo])
+    state.repositoryRoots = [repo.rootURL]
+
+    let renamedTab = TerminalTabID()
+    let blankTab = TerminalTabID()
+    let unrelatedTab = TerminalTabID()
+    state.sidebarItems[id: feature.id]?.tabsSummary = WorktreeTabsSummary(
+      tabs: [
+        .init(id: renamedTab, title: "  Fix login flow  ", icon: nil, tint: nil),
+        .init(id: blankTab, title: "   ", icon: nil, tint: nil),
+        .init(id: unrelatedTab, title: "zsh", icon: nil, tint: nil),
+      ],
+      selectedTabID: renamedTab
+    )
+
+    let renamed = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: renamedTab, title: "claude", body: "waiting", createdAt: .distantPast
+    )
+    let blank = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: blankTab, title: "claude", body: "waiting", createdAt: .distantPast
+    )
+    let untabbed = WorktreeTerminalNotification(
+      surfaceID: UUID(), title: "claude", body: "waiting", createdAt: .distantPast
+    )
+    setRowNotifications(&state, id: feature.id, notifications: [renamed, blank, untabbed])
+
+    let group = state.computeToolbarNotificationGroups().first?.worktrees.first
+
+    // Only referenced tabs with a non-blank title make it in; blank / gone
+    // tabs fall back to the agent name in the row.
+    #expect(group?.tabTitles == [renamedTab: "Fix login flow"])
+    #expect(group?.sessionTitle(for: renamed) == "Fix login flow")
+    #expect(group?.sessionTitle(for: blank) == nil)
+    #expect(group?.sessionTitle(for: untabbed) == nil)
+  }
+
+  @Test func unreferencedTabTitleChurnKeepsGroupsEqual() {
+    // `tabsSnapshotChanged` now invalidates the notification-groups cache; the
+    // Equatable diff must stay blind to title churn on tabs no notification
+    // points at, or every shell-title update would re-render the inspector.
+    let repoPath = "/tmp/repo-churn"
+    let main = makeWorktree(id: repoPath, name: "main", repoRoot: repoPath)
+    let feature = makeWorktree(id: "\(repoPath)/feature", name: "feature", repoRoot: repoPath)
+    let repo = makeRepository(id: repoPath, name: "Repo", worktrees: [main, feature])
+    var state = RepositoriesFeature.State(reconciledRepositories: [repo])
+    state.repositoryRoots = [repo.rootURL]
+
+    let notifiedTab = TerminalTabID()
+    let noisyTab = TerminalTabID()
+    setRowNotifications(
+      &state, id: feature.id,
+      notifications: [
+        WorktreeTerminalNotification(
+          surfaceID: UUID(), tabID: notifiedTab, title: "claude", body: "waiting", createdAt: .distantPast
+        )
+      ])
+    state.sidebarItems[id: feature.id]?.tabsSummary = WorktreeTabsSummary(
+      tabs: [
+        .init(id: notifiedTab, title: "Session", icon: nil, tint: nil),
+        .init(id: noisyTab, title: "make build", icon: nil, tint: nil),
+      ],
+      selectedTabID: notifiedTab
+    )
+    let before = state.computeToolbarNotificationGroups()
+
+    state.sidebarItems[id: feature.id]?.tabsSummary.tabs[1] =
+      .init(id: noisyTab, title: "make test", icon: nil, tint: nil)
+    #expect(state.computeToolbarNotificationGroups() == before)
+
+    state.sidebarItems[id: feature.id]?.tabsSummary.tabs[0] =
+      .init(id: notifiedTab, title: "Renamed Session", icon: nil, tint: nil)
+    #expect(state.computeToolbarNotificationGroups() != before)
+  }
+
+  @Test func tabsSnapshotChangedInvalidatesNotificationGroupsCache() {
+    // The session headline reads tab titles out of the cached groups, so a
+    // rename must trigger the post-reduce recompute.
+    let action = SidebarItemFeature.Action.tabsSnapshotChanged(WorktreeTabsSummary())
+    #expect(action.cacheInvalidations == .toolbarNotificationGroups)
+  }
+
   @Test func includesRepoLevelIssueNotificationsWithoutWorktreeNotifications() {
     let repoPath = "/tmp/repo-a"
     let main = makeWorktree(id: repoPath, name: "main", repoRoot: repoPath)

@@ -365,11 +365,15 @@ extension SidebarItemFeature.Action {
       return .all
     case .pullRequestChanged:
       return .selectedWorktreeSlice
-    // Tabs live only on the leaf (title / sub-rows render off the scoped
-    // store), so title storms never touch the structure caches.
+    // Tab titles feed the notification rows' session headlines; the recompute
+    // Equatable-diffs against `tabTitles` (referenced tabs only), so title
+    // storms on notification-less rows never invalidate SwiftUI. The sidebar
+    // structure stays untouched (title / sub-rows render off the scoped store).
+    case .tabsSnapshotChanged:
+      return .toolbarNotificationGroups
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
-      .tabsSnapshotChanged, .tabAgentsChanged, .tabListExpansionToggled,
+      .tabAgentsChanged, .tabListExpansionToggled,
       .focusTerminalRequested, .focusTerminalConsumed:
       return []
     }

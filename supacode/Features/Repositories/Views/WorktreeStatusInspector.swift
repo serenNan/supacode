@@ -526,6 +526,7 @@ private struct NotificationsInspectorContent: View {
                     NotificationRow(
                       notification: notification,
                       worktreeID: worktree.id,
+                      sessionTitle: worktree.sessionTitle(for: notification),
                       now: context.date,
                       onSelect: onSelectNotification
                     )
@@ -664,14 +665,24 @@ private struct IssueNotificationRow: View {
 private struct NotificationRow: View {
   let notification: WorktreeTerminalNotification
   let worktreeID: Worktree.ID
+  /// Live title of the notification's tab; when the notification came from an
+  /// agent this replaces the generic agent name so rows are tellable apart
+  /// (and it tracks agent/user renames). Nil when the tab is gone or untitled.
+  let sessionTitle: String?
   let now: Date
   let onSelect: (Worktree.ID, WorktreeTerminalNotification) -> Void
 
   var body: some View {
     // Notification titles are the agent slug ("claude", "codex", …) when the
-    // notification came from an agent; show its mark and display name instead.
+    // notification came from an agent; show its mark, headlined by the session
+    // (tab) title when one exists, else the agent display name. Non-agent
+    // notifications keep their own title (it's real content, not a slug).
     let agent = SkillAgent(rawValue: notification.title.lowercased())
-    let title = agent?.displayName ?? (notification.title.isEmpty ? "Terminal" : notification.title)
+    let fallbackTitle = agent?.displayName ?? (notification.title.isEmpty ? "Terminal" : notification.title)
+    // An unrenamed tab is titled with the bare process name ("claude"); map
+    // that back to the display name rather than headlining the raw slug.
+    let resolvedSessionTitle = sessionTitle.map { SkillAgent(rawValue: $0.lowercased())?.displayName ?? $0 }
+    let title = (agent != nil ? resolvedSessionTitle : nil) ?? fallbackTitle
     Button {
       onSelect(worktreeID, notification)
     } label: {
