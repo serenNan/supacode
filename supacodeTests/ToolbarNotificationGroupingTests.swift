@@ -401,6 +401,95 @@ struct ToolbarNotificationGroupingTests {
     #expect(groups.first?.unreadCount == 1)
   }
 
+  @Test func clustersNotificationsBySessionNewestFirst() {
+    let repoPath = "/tmp/repo-clusters"
+    let main = makeWorktree(id: repoPath, name: "main", repoRoot: repoPath)
+    let feature = makeWorktree(id: "\(repoPath)/feature", name: "feature", repoRoot: repoPath)
+    let repo = makeRepository(id: repoPath, name: "Repo", worktrees: [main, feature])
+    var state = RepositoriesFeature.State(reconciledRepositories: [repo])
+    state.repositoryRoots = [repo.rootURL]
+
+    let tabA = TerminalTabID()
+    let tabB = TerminalTabID()
+    let newestA = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: tabA, title: "claude", body: "a3", createdAt: Date(timeIntervalSince1970: 30)
+    )
+    let onlyB = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: tabB, title: "claude", body: "b1", createdAt: Date(timeIntervalSince1970: 25)
+    )
+    let middleA = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: tabA, title: "claude", body: "a2", createdAt: Date(timeIntervalSince1970: 20)
+    )
+    let oldestA = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: tabA, title: "claude", body: "a1", createdAt: Date(timeIntervalSince1970: 10)
+    )
+    // Storage order: newest first, matching WorktreeTerminalState's insert-at-0.
+    setRowNotifications(&state, id: feature.id, notifications: [newestA, onlyB, middleA, oldestA])
+
+    let clusters = state.computeToolbarNotificationGroups().first?.worktrees.first?.sessionClusters
+
+    #expect(clusters?.map(\.id) == [.tab(tabA), .tab(tabB)])
+    #expect(clusters?.first?.notifications.map(\.body) == ["a3", "a2", "a1"])
+    #expect(clusters?.first?.olderCount == 2)
+    #expect(clusters?.last?.olderCount == 0)
+  }
+
+  @Test func clustersFallBackToSurfaceWhenTabIsGone() {
+    let repoPath = "/tmp/repo-surface-clusters"
+    let main = makeWorktree(id: repoPath, name: "main", repoRoot: repoPath)
+    let feature = makeWorktree(id: "\(repoPath)/feature", name: "feature", repoRoot: repoPath)
+    let repo = makeRepository(id: repoPath, name: "Repo", worktrees: [main, feature])
+    var state = RepositoriesFeature.State(reconciledRepositories: [repo])
+    state.repositoryRoots = [repo.rootURL]
+
+    let surface1 = UUID()
+    let surface2 = UUID()
+    let newer = WorktreeTerminalNotification(
+      surfaceID: surface1, title: "claude", body: "s1-new", createdAt: Date(timeIntervalSince1970: 20)
+    )
+    let other = WorktreeTerminalNotification(
+      surfaceID: surface2, title: "claude", body: "s2", createdAt: Date(timeIntervalSince1970: 15)
+    )
+    let older = WorktreeTerminalNotification(
+      surfaceID: surface1, title: "claude", body: "s1-old", createdAt: Date(timeIntervalSince1970: 10)
+    )
+    setRowNotifications(&state, id: feature.id, notifications: [newer, other, older])
+
+    let clusters = state.computeToolbarNotificationGroups().first?.worktrees.first?.sessionClusters
+
+    #expect(clusters?.map(\.id) == [.surface(surface1), .surface(surface2)])
+    #expect(clusters?.first?.notifications.map(\.body) == ["s1-new", "s1-old"])
+  }
+
+  @Test func clusterCountsHiddenUnreadForCollapsedHint() {
+    let repoPath = "/tmp/repo-hidden-unread"
+    let main = makeWorktree(id: repoPath, name: "main", repoRoot: repoPath)
+    let feature = makeWorktree(id: "\(repoPath)/feature", name: "feature", repoRoot: repoPath)
+    let repo = makeRepository(id: repoPath, name: "Repo", worktrees: [main, feature])
+    var state = RepositoriesFeature.State(reconciledRepositories: [repo])
+    state.repositoryRoots = [repo.rootURL]
+
+    let tab = TerminalTabID()
+    // The newest (visible) row is unread too, but only *hidden* rows count
+    // toward the expand-control hint.
+    let newestUnread = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: tab, title: "claude", body: "new", createdAt: Date(timeIntervalSince1970: 30)
+    )
+    let hiddenUnread = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: tab, title: "claude", body: "mid", createdAt: Date(timeIntervalSince1970: 20)
+    )
+    let hiddenRead = WorktreeTerminalNotification(
+      surfaceID: UUID(), tabID: tab, title: "claude", body: "old", createdAt: Date(timeIntervalSince1970: 10),
+      isRead: true
+    )
+    setRowNotifications(&state, id: feature.id, notifications: [newestUnread, hiddenUnread, hiddenRead])
+
+    let clusters = state.computeToolbarNotificationGroups().first?.worktrees.first?.sessionClusters
+
+    #expect(clusters?.count == 1)
+    #expect(clusters?.first?.hiddenUnreadCount == 1)
+  }
+
   private func setRowNotifications(
     _ state: inout RepositoriesFeature.State,
     id: SidebarItemID,

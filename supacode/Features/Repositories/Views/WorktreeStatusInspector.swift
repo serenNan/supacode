@@ -478,6 +478,9 @@ private struct NotificationsInspectorContent: View {
   let onSelectNotification: (Worktree.ID, WorktreeTerminalNotification) -> Void
   let onSelectIssueNotification: (RepositoryIssueNotification) -> Void
   let onDismissAll: () -> Void
+  /// Sessions whose older notifications are shown inline. Transient by design:
+  /// a pane switch or relaunch falls back to collapsed.
+  @State private var expandedClusters: Set<NotificationSessionKey> = []
 
   var body: some View {
     let count = groups.reduce(0) { $0 + $1.notificationCount }
@@ -522,14 +525,38 @@ private struct NotificationsInspectorContent: View {
               }
               ForEach(repository.worktrees) { worktree in
                 Section {
-                  ForEach(worktree.notifications) { notification in
+                  // One row per session by default: the newest notification,
+                  // with the session's older history behind an expand toggle.
+                  ForEach(worktree.sessionClusters) { cluster in
                     NotificationRow(
-                      notification: notification,
+                      notification: cluster.newest,
                       worktreeID: worktree.id,
-                      sessionTitle: worktree.sessionTitle(for: notification),
+                      sessionTitle: worktree.sessionTitle(for: cluster.newest),
                       now: context.date,
                       onSelect: onSelectNotification
                     )
+                    if cluster.olderCount > 0 {
+                      if expandedClusters.contains(cluster.id) {
+                        ForEach(cluster.notifications.dropFirst()) { notification in
+                          NotificationRow(
+                            notification: notification,
+                            worktreeID: worktree.id,
+                            sessionTitle: worktree.sessionTitle(for: notification),
+                            now: context.date,
+                            onSelect: onSelectNotification
+                          )
+                        }
+                      }
+                      ClusterToggleRow(
+                        olderCount: cluster.olderCount,
+                        hiddenUnreadCount: cluster.hiddenUnreadCount,
+                        isExpanded: expandedClusters.contains(cluster.id)
+                      ) {
+                        if !expandedClusters.insert(cluster.id).inserted {
+                          expandedClusters.remove(cluster.id)
+                        }
+                      }
+                    }
                   }
                 } header: {
                   NotificationWorktreeHeader(repository: repository, worktree: worktree)
@@ -659,6 +686,47 @@ private struct IssueNotificationRow: View {
   private static func relativeTime(_ date: Date, now: Date) -> String {
     guard now.timeIntervalSince(date) >= 60 else { return "now" }
     return date.formatted(.relative(presentation: .named, unitsStyle: .narrow))
+  }
+}
+
+/// Expand/collapse control under a session's newest notification. While
+/// collapsed it must keep hidden unread state discoverable, so it carries an
+/// unread dot + count when any hidden notification is unread.
+private struct ClusterToggleRow: View {
+  let olderCount: Int
+  let hiddenUnreadCount: Int
+  let isExpanded: Bool
+  let onToggle: () -> Void
+
+  var body: some View {
+    Button(action: onToggle) {
+      HStack(spacing: 6) {
+        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+          .font(.caption2)
+          .accessibilityHidden(true)
+        Text(isExpanded ? "Hide Older" : "Show \(olderCount) Older")
+        if !isExpanded, hiddenUnreadCount > 0 {
+          Circle()
+            .fill(.orange)
+            .frame(width: 6, height: 6)
+            .accessibilityHidden(true)
+          Text("\(hiddenUnreadCount) unread")
+        }
+        Spacer()
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      // Indent under the row content, past NotificationSourceIcon's column.
+      .padding(.leading, 32)
+      .contentShape(.rect)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .buttonStyle(.plain)
+    .help(
+      isExpanded
+        ? "Hide this session's older notifications."
+        : "Show this session's older notifications."
+    )
   }
 }
 

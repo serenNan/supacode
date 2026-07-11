@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-07-12 通知面板按会话折叠
+- 通知 inspector 里同一会话（tab）的多条通知默认折叠：只显示最新一条，其余收进 "Show N Older" 展开控件，点开内联显示完整历史；纯 UI 折叠，不删任何通知数据（区别于已 revert 的"每 tab 只留一条"23f768df）
+- 折叠时若隐藏的旧通知里有未读，控件上带橙点 + "N unread" 提示，未读永不被折叠吞掉；铃铛计数语义不变
+- 实现：ToolbarNotificationWorktreeGroup 增加 sessionClusters 计算属性（键 tabID，tab 已关时回退 surfaceID 归组），展开状态是 inspector 的临时 @State 不持久化；新增 3 个分组测试
+- OpenSpec change：openspec/changes/collapse-notifications-by-session
+
 ## 2026-07-11 回合上游三个修复 PR + 测试 locale 修正
 - cherry-pick 上游未合并的 bug 修复 PR（作者 jeremybower）：#639 tuist 重新生成只清本 worktree 的 DerivedData（挪到仓库内 `.build/DerivedData`，根治并行 worktree 构建互删）、#638 coalescesBurstOfProgressReports 改 advance-until-settled 循环去 flaky、#632 merge queue ETA 测试适配 macOS 26.5
 - 在 #632 之上追加 fork 修正：surfacesPositionAndEstimatedTime 的分钟拼写既随 OS 版本也随 locale/地区变（作者 en_CA 26.5 出 "mins"，本机同版本出 "min"），版本判断修不干净；改为按同文件 formatsMultiUnitEstimate 先例断言形状+组合、不断言拼写。此测试在本机一直挂的根因即此（对应记忆里"date 依赖测试待修"）

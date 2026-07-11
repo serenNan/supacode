@@ -49,6 +49,48 @@ struct ToolbarNotificationWorktreeGroup: Identifiable, Equatable {
   func sessionTitle(for notification: WorktreeTerminalNotification) -> String? {
     notification.tabID.flatMap { tabTitles[$0] }
   }
+
+  /// Notifications regrouped per session for the inspector's collapsed
+  /// rendering. Derived from `notifications` (kept newest-first by
+  /// `appendNotification`'s insert-at-0), so cluster order is the order each
+  /// session last notified and no extra Equatable surface is added.
+  var sessionClusters: [NotificationSessionCluster] {
+    var order: [NotificationSessionKey] = []
+    var byKey: [NotificationSessionKey: [WorktreeTerminalNotification]] = [:]
+    for notification in notifications {
+      let key = NotificationSessionKey(notification)
+      if byKey[key] == nil {
+        order.append(key)
+      }
+      byKey[key, default: []].append(notification)
+    }
+    return order.map { NotificationSessionCluster(id: $0, notifications: byKey[$0] ?? []) }
+  }
+}
+
+/// Identity of a notification's session: its tab when recorded, else the
+/// surface — so notifications from an already-closed tab still cluster with
+/// their surface siblings instead of one row each.
+enum NotificationSessionKey: Hashable {
+  case tab(TerminalTabID)
+  case surface(UUID)
+
+  init(_ notification: WorktreeTerminalNotification) {
+    self = notification.tabID.map(Self.tab) ?? .surface(notification.surfaceID)
+  }
+}
+
+/// One session's notifications, newest first. The inspector renders `newest`
+/// when collapsed and the rest behind an expand control.
+struct NotificationSessionCluster: Identifiable, Equatable {
+  let id: NotificationSessionKey
+  let notifications: [WorktreeTerminalNotification]
+
+  var newest: WorktreeTerminalNotification { notifications[0] }
+  var olderCount: Int { notifications.count - 1 }
+  /// Unread among the *hidden* (older) notifications only; the visible newest
+  /// row already shows its own unread dot.
+  var hiddenUnreadCount: Int { notifications.dropFirst().count { !$0.isRead } }
 }
 
 extension RepositoriesFeature.State {
