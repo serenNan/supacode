@@ -278,6 +278,69 @@ struct SidebarItemFeatureTests {
     await store.send(.dragSessionChanged(isDragging: true))
   }
 
+  // MARK: - Tab-strip snapshot.
+
+  @Test func tabsSnapshotUpdatesStateAndCollapsesOnSingleTab() async {
+    let tabA = TerminalTabID()
+    let tabB = TerminalTabID()
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    let twoTabs = WorktreeTabsSummary(
+      tabs: [
+        .init(id: tabA, title: "Claude Code", icon: nil, tint: nil),
+        .init(id: tabB, title: "Tests", icon: nil, tint: nil),
+      ],
+      selectedTabID: tabB
+    )
+    await store.send(.tabsSnapshotChanged(twoTabs)) {
+      $0.tabsSummary = twoTabs
+    }
+    #expect(store.state.selectedTabTitle == "Tests")
+
+    await store.send(.tabListExpansionToggled) {
+      $0.isTabListExpanded = true
+    }
+
+    // Identical snapshot: no-op.
+    await store.send(.tabsSnapshotChanged(twoTabs))
+
+    // Dropping to one tab resets the expansion.
+    let oneTab = WorktreeTabsSummary(
+      tabs: [.init(id: tabA, title: "Claude Code", icon: nil, tint: nil)],
+      selectedTabID: tabA
+    )
+    await store.send(.tabsSnapshotChanged(oneTab)) {
+      $0.tabsSummary = oneTab
+      $0.isTabListExpanded = false
+    }
+  }
+
+  @Test func selectedTabTitleFallsBackOnBlankOrMissing() {
+    var state = makeState(name: "feature")
+    let blankTab = TerminalTabID()
+    // Selected tab with a blank title → nil (view falls back to branch name).
+    state.tabsSummary = WorktreeTabsSummary(
+      tabs: [.init(id: blankTab, title: "   ", icon: nil, tint: nil)],
+      selectedTabID: blankTab
+    )
+    #expect(state.selectedTabTitle == nil)
+
+    // No tabs at all → nil.
+    state.tabsSummary = WorktreeTabsSummary(tabs: [], selectedTabID: nil)
+    #expect(state.selectedTabTitle == nil)
+  }
+
+  @Test func selectedTabTitleTrimsWhitespace() {
+    var state = makeState(name: "feature")
+    let tab = TerminalTabID()
+    state.tabsSummary = WorktreeTabsSummary(
+      tabs: [.init(id: tab, title: "  Claude Code  ", icon: nil, tint: nil)],
+      selectedTabID: tab
+    )
+    #expect(state.selectedTabTitle == "Claude Code")
+  }
+
   // MARK: - Helpers.
 
   private func makeState(name: String) -> SidebarItemFeature.State {

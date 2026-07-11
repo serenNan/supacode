@@ -91,6 +91,9 @@ final class WorktreeTerminalState {
   /// mid-operation states (e.g. the supersede clear-then-record in
   /// `runBlockingScript`) never reach TCA.
   @ObservationIgnored private var pendingRunningScriptsProjectionEmit = false
+  /// Coalesces per-mutation tab-manager callbacks into one next-tick emit so a
+  /// create-then-select or a reorder never reaches TCA mid-operation.
+  @ObservationIgnored private var pendingTabsSummaryEmit = false
   private var blockingScriptLaunchDirectories: [TerminalTabID: URL] = [:]
   private var lastBlockingScriptTabByKind: [BlockingScriptKind: TerminalTabID] = [:]
   private var pendingSetupScript: Bool
@@ -208,6 +211,10 @@ final class WorktreeTerminalState {
   /// active surface (selected tab) or worst-of-all (unselected tabs) so the
   /// stripe stays in lock-step with focus and OSC-9 progress mutations.
   var onTabProgressDisplayChanged: ((TerminalTabID, TerminalTabProgressDisplay?) -> Void)?
+  /// Fires (coalesced, next tick) when the tab strip's snapshot (titles /
+  /// order / selection) drifts. Manager re-emits the Equatable-diffed
+  /// `WorktreeTabsSummary` so the sidebar row mirrors terminal truth.
+  var onTabsSummaryChanged: (() -> Void)?
 
   init(
     runtime: GhosttyRuntime,
@@ -229,6 +236,9 @@ final class WorktreeTerminalState {
     // the steady state once tabs exist.
     @Shared(.settingsFile) var settingsFile
     self.shouldHideTabBar = settingsFile.global.hideSingleTabBar
+    tabManager.onSnapshotChanged = { [weak self] in
+      self?.scheduleTabsSummaryEmit()
+    }
   }
 
   var taskStatus: WorktreeTaskStatus {
@@ -277,6 +287,28 @@ final class WorktreeTerminalState {
       guard let self else { return }
       self.pendingRunningScriptsProjectionEmit = false
       self.onRunningScriptsChanged?()
+    }
+  }
+
+  /// Snapshot of the tab strip consumed by the sidebar row (via the manager's
+  /// `worktreeTabsChanged` event). Titles use `displayTitle` so a user rename
+  /// wins over the live shell title, matching the tab bar.
+  func currentTabsSummary() -> WorktreeTabsSummary {
+    WorktreeTabsSummary(
+      tabs: tabManager.tabs.map {
+        WorktreeTabsSummary.Tab(id: $0.id, title: $0.displayTitle, icon: $0.icon, tint: $0.tintColor)
+      },
+      selectedTabID: tabManager.selectedTabId
+    )
+  }
+
+  private func scheduleTabsSummaryEmit() {
+    guard !pendingTabsSummaryEmit else { return }
+    pendingTabsSummaryEmit = true
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      self.pendingTabsSummaryEmit = false
+      self.onTabsSummaryChanged?()
     }
   }
 

@@ -111,6 +111,35 @@ struct TerminalTabManagerTests {
     #expect(manager.tabs.first { $0.id == tabId }?.title == "Run Script")
   }
 
+  @Test func snapshotCallbackFiresOnTabAndSelectionMutations() {
+    let manager = TerminalTabManager()
+    var fireCount = 0
+    manager.onSnapshotChanged = { fireCount += 1 }
+
+    let first = manager.createTab(title: "one", icon: nil)  // tabs + selectedTabId
+    let afterCreate = fireCount
+    #expect(afterCreate >= 1)
+
+    manager.updateTitle(first, title: "renamed")
+    #expect(fireCount == afterCreate + 1)
+
+    // No-op title write must not fire (updateTitle's equality guard).
+    manager.updateTitle(first, title: "renamed")
+    #expect(fireCount == afterCreate + 1)
+
+    let second = manager.createTab(title: "two", icon: nil)
+    let afterSecond = fireCount
+    manager.selectTab(first)
+    #expect(fireCount == afterSecond + 1)
+
+    // Selecting the already-selected tab must not fire.
+    manager.selectTab(first)
+    #expect(fireCount == afterSecond + 1)
+
+    manager.closeTab(second)
+    #expect(fireCount > afterSecond + 1)
+  }
+
   @Test func setCustomTitleOverridesDisplayTitle() {
     let manager = TerminalTabManager()
     let id = manager.createTab(title: "tab 1", icon: nil)
