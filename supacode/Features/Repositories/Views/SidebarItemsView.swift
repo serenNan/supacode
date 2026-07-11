@@ -454,10 +454,12 @@ private struct SidebarTabSubRows: View {
   var body: some View {
     if showsSessionTitles, store.state.isTabListExpanded {
       let summary = store.state.tabsSummary
+      let tabAgents = store.state.tabAgents
       let rowID = store.state.id
       ForEach(summary.tabs) { tab in
         SidebarTabSubRow(
           tab: tab,
+          agents: tabAgents[tab.id] ?? [],
           isSelected: tab.id == summary.selectedTabID,
           nestDepth: nestDepth
         ) {
@@ -470,6 +472,9 @@ private struct SidebarTabSubRows: View {
 
 private struct SidebarTabSubRow: View {
   let tab: WorktreeTabsSummary.Tab
+  /// Agents running in this tab; when non-empty their marks replace the
+  /// generic tab icon so the expanded list mirrors the collapsed row's badges.
+  let agents: [AgentPresenceFeature.AgentInstance]
   let isSelected: Bool
   let nestDepth: Int
   let select: () -> Void
@@ -477,10 +482,14 @@ private struct SidebarTabSubRow: View {
   var body: some View {
     Button(action: select) {
       HStack(spacing: 6) {
-        Image(systemName: tab.icon ?? "terminal")
-          .imageScale(.small)
-          .foregroundStyle(tab.tint.map { AnyShapeStyle($0.color) } ?? AnyShapeStyle(.secondary))
-          .accessibilityHidden(true)
+        if agents.isEmpty {
+          Image(systemName: tab.icon ?? "terminal")
+            .imageScale(.small)
+            .foregroundStyle(tab.tint.map { AnyShapeStyle($0.color) } ?? AnyShapeStyle(.secondary))
+            .accessibilityHidden(true)
+        } else {
+          AgentAvatarGroupView(instances: agents, size: 14, maxVisible: 2)
+        }
         Text(tab.title)
           .font(.callout)
           .fontWeight(isSelected ? .semibold : .regular)

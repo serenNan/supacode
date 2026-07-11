@@ -1543,6 +1543,21 @@ struct AppFeature {
           )
         )
       )
+      // Same snapshot regrouped per tab so the row's expanded sub-rows can
+      // show each tab's own agent mark. Keyed off `terminalTabs` (the live
+      // tab → surfaces map); empty tabs are omitted.
+      var tabAgents: [TerminalTabID: [AgentPresenceFeature.AgentInstance]] = [:]
+      for tab in state.terminals.terminalTabs where tab.worktreeID == rowID {
+        let agentsInTab = presence.agents(across: tab.surfaceIDs, badgesEnabled: badgesEnabled)
+        if !agentsInTab.isEmpty { tabAgents[tab.id] = agentsInTab }
+      }
+      effects.append(
+        .send(
+          .repositories(
+            .sidebarItems(.element(id: rowID, action: .tabAgentsChanged(tabAgents)))
+          )
+        )
+      )
       affectedSurfaces.formUnion(row.surfaceIDs)
     }
     // Per-tab fanout: any tab containing an affected surface re-projects its

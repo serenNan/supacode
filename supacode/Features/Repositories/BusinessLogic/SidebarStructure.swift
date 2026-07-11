@@ -369,7 +369,7 @@ extension SidebarItemFeature.Action {
     // store), so title storms never touch the structure caches.
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
-      .tabsSnapshotChanged, .tabListExpansionToggled,
+      .tabsSnapshotChanged, .tabAgentsChanged, .tabListExpansionToggled,
       .focusTerminalRequested, .focusTerminalConsumed:
       return []
     }
