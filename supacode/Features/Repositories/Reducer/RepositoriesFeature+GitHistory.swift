@@ -210,19 +210,28 @@ extension RepositoriesFeature {
     let client = historyGitClient(for: worktree)
     let worktreeURL = worktree.workingDirectory
     let worktreeID = worktree.id
-    let loadEffect: Effect<Action> = .run { send in
+    // An expanded uncommitted node tracks the same refresh triggers as the list,
+    // so its file breakdown never goes stale behind the +/- counts. One effect,
+    // fixed send order (history before files), so refreshes can't race.
+    let reloadUncommittedFiles = state.gitHistory?.isUncommittedExpanded == true
+    return .run { send in
       do {
         let snapshot = try await client.commitHistory(worktreeURL, Self.gitHistoryCommitLimit)
         await send(.gitHistory(.loaded(worktreeID: worktreeID, snapshot)))
       } catch {
         await send(.gitHistory(.failed(worktreeID: worktreeID, message: error.localizedDescription)))
       }
+      guard reloadUncommittedFiles else { return }
+      do {
+        let files = try await client.uncommittedFiles(worktreeURL)
+        await send(.gitHistory(.uncommittedFilesLoaded(worktreeID: worktreeID, files)))
+      } catch {
+        await send(
+          .gitHistory(
+            .uncommittedFilesFailed(worktreeID: worktreeID, message: error.localizedDescription)))
+      }
     }
     .cancellable(id: GitHistoryCancelID.load, cancelInFlight: true)
-    // An expanded uncommitted node tracks the same refresh triggers as the list,
-    // so its file breakdown never goes stale behind the +/- counts.
-    guard state.gitHistory?.isUncommittedExpanded == true else { return loadEffect }
-    return .merge(loadEffect, loadUncommittedFiles(worktree: worktree))
   }
 
   private func loadUncommittedFiles(worktree: Worktree) -> Effect<Action> {
