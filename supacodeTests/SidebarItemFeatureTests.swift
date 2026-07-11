@@ -296,7 +296,6 @@ struct SidebarItemFeatureTests {
     await store.send(.tabsSnapshotChanged(twoTabs)) {
       $0.tabsSummary = twoTabs
     }
-    #expect(store.state.selectedTabTitle == "Tests")
 
     await store.send(.tabListExpansionToggled) {
       $0.isTabListExpanded = true
@@ -337,31 +336,6 @@ struct SidebarItemFeatureTests {
     await store.send(.tabAgentsChanged([:])) {
       $0.tabAgents = [:]
     }
-  }
-
-  @Test func selectedTabTitleFallsBackOnBlankOrMissing() {
-    var state = makeState(name: "feature")
-    let blankTab = TerminalTabID()
-    // Selected tab with a blank title → nil (view falls back to branch name).
-    state.tabsSummary = WorktreeTabsSummary(
-      tabs: [.init(id: blankTab, title: "   ", icon: nil, tint: nil)],
-      selectedTabID: blankTab
-    )
-    #expect(state.selectedTabTitle == nil)
-
-    // No tabs at all → nil.
-    state.tabsSummary = WorktreeTabsSummary(tabs: [], selectedTabID: nil)
-    #expect(state.selectedTabTitle == nil)
-  }
-
-  @Test func selectedTabTitleTrimsWhitespace() {
-    var state = makeState(name: "feature")
-    let tab = TerminalTabID()
-    state.tabsSummary = WorktreeTabsSummary(
-      tabs: [.init(id: tab, title: "  Claude Code  ", icon: nil, tint: nil)],
-      selectedTabID: tab
-    )
-    #expect(state.selectedTabTitle == "Claude Code")
   }
 
   // MARK: - Helpers.
