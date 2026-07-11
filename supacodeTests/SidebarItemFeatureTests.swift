@@ -316,6 +316,29 @@ struct SidebarItemFeatureTests {
     }
   }
 
+  @Test func tabAgentsSnapshotReplacesWholesaleAndSkipsNoOps() async {
+    let tabA = TerminalTabID()
+    let tabB = TerminalTabID()
+    let claude = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.tabAgentsChanged([tabA: [claude]])) {
+      $0.tabAgents = [tabA: [claude]]
+    }
+    // Same payload: no-op.
+    await store.send(.tabAgentsChanged([tabA: [claude]]))
+    // The fan-out sends the full per-row map, so a new snapshot replaces it
+    // wholesale (agent moved to tabB; tabA drops out).
+    await store.send(.tabAgentsChanged([tabB: [claude]])) {
+      $0.tabAgents = [tabB: [claude]]
+    }
+    // Agents gone: map drains.
+    await store.send(.tabAgentsChanged([:])) {
+      $0.tabAgents = [:]
+    }
+  }
+
   @Test func selectedTabTitleFallsBackOnBlankOrMissing() {
     var state = makeState(name: "feature")
     let blankTab = TerminalTabID()

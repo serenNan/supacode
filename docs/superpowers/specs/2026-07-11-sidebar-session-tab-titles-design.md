@@ -67,6 +67,11 @@
 - `selectWorktreeTab` action 单测。
 - 测试禁用 `Task.sleep`，用 `TestClock`。
 
+## 后续完善（2026-07-11 第二轮）
+
+1. **子行 agent 图标**：`AppFeature.agentSnapshotEffects` 在既有 per-row 扇出旁，用 `state.terminals.terminalTabs`（tab→surfaces 映射）把同一份 presence 快照按 tab 重分组，经新 action `tabAgentsChanged([TerminalTabID: [AgentInstance]])` 存进 `SidebarItemFeature.State.tabAgents`（`cacheInvalidations = []`）。子行左侧图标：该 tab 有 agent 时渲染 `AgentAvatarGroupView`（size 14, maxVisible 2），否则保留默认 tab 图标。展开时父行的聚合 agent 徽章隐藏（视觉上"移入"子行），折叠即恢复。
+2. **整行点击展开**：`SidebarItemView` 的标题区（Title + Spacer，不含行尾控件）加 `simultaneousGesture(TapGesture)`，多 tab 且开关开启时 toggle 展开；⌘/⇧ 点击（多选手势）跳过；chevron 按钮保留为显式控件，且因位于手势区外不会双触发。
+
 ## 涉及文件（预估）
 
 - `WorktreeTerminalState.swift`（投影字段 + emit 时机）

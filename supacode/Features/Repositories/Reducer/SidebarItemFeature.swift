@@ -103,6 +103,10 @@ struct SidebarItemFeature {
 
     var agents: [AgentPresenceFeature.AgentInstance] = []
     var hasAgentActivity: Bool = false
+    /// Running agents grouped by terminal tab, fed by the parent's
+    /// agent-presence fan-out. Read by the expanded per-tab sub-rows so each
+    /// row can show its own agent mark instead of the generic tab icon.
+    var tabAgents: [TerminalTabID: [AgentPresenceFeature.AgentInstance]] = [:]
 
     var surfaceIDs: [UUID] = []
     /// Sticky once `terminalProjectionChanged` arrives, so a subsequent
@@ -133,6 +137,7 @@ struct SidebarItemFeature {
     case pullRequestQueryStarted(branch: String)
     case pullRequestChanged(GithubPullRequest?, branchAtQueryTime: String)
     case agentSnapshotChanged([AgentPresenceFeature.AgentInstance], hasActivity: Bool)
+    case tabAgentsChanged([TerminalTabID: [AgentPresenceFeature.AgentInstance]])
     case terminalProjectionChanged(WorktreeRowProjection)
     case tabsSnapshotChanged(WorktreeTabsSummary)
     case tabListExpansionToggled
@@ -177,6 +182,11 @@ struct SidebarItemFeature {
         guard state.agents != agents || state.hasAgentActivity != hasActivity else { return .none }
         state.agents = agents
         state.hasAgentActivity = hasActivity
+        return .none
+
+      case .tabAgentsChanged(let tabAgents):
+        guard state.tabAgents != tabAgents else { return .none }
+        state.tabAgents = tabAgents
         return .none
 
       case .terminalProjectionChanged(let projection):

@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-07-11 侧边栏会话子行完善（agent 图标 + 整行点击展开）
+- agent 出勤扇出按 tab 重分组（AppFeature.agentSnapshotEffects → 新 action tabAgentsChanged → SidebarItemFeature.State.tabAgents），展开的子行左侧图标换成该 tab 内运行 agent 的徽章（AgentAvatarGroupView，等待输入反色保留），无 agent 的 tab 保持默认图标；展开时父行聚合 agent 徽章隐藏，收起恢复
+- 行标题区（不含行尾控件）加 simultaneousGesture 点击切换子行展开/收起，⌘/⇧ 多选点击跳过，chevron 按钮保留为显式控件
+- 新增 SidebarItemFeatureTests.tabAgentsSnapshotReplacesWholesaleAndSkipsNoOps；并行会话构建互踩用独立 -derivedDataPath 隔离（比开 worktree 轻量）
+
 ## 2026-07-11 GitHub issue 追踪
 - 状态检查器新增 Pull Request / Issues 分段切换：Issues 页列出仓库（fork 自动解析上游）最近更新的 50 个 open issue（编号、标题、标签、作者、评论数、相对时间），点击跳 GitHub
 - issue 轮询搭 PR 刷新顺风车（同 30/60s 节奏、同 githubIntegrationEnabled 开关，无新任务表）；快照 diff 检测新 issue / 新评论 / 标签变化，推 repo 级通知到工具栏铃铛（首载静默），点通知开 issue 页并标已读

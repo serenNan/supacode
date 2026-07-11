@@ -1,3 +1,4 @@
+import AppKit
 import ComposableArchitecture
 import SupacodeSettingsShared
 import SwiftUI
@@ -57,16 +58,24 @@ struct SidebarItemView: View {
 
     Label {
       HStack(spacing: 8) {
-        TitleView(
-          name: resolved.name,
-          subtitle: resolved.subtitle,
-          accent: resolved.accent,
-          customTint: store.customTint,
-          isLifecycleBusy: store.lifecycle.isBusy,
-          isTaskRunning: store.isTaskRunning
-        )
-        .equatable()
-        Spacer(minLength: 0)
+        HStack(spacing: 0) {
+          TitleView(
+            name: resolved.name,
+            subtitle: resolved.subtitle,
+            accent: resolved.accent,
+            customTint: store.customTint,
+            isLifecycleBusy: store.lifecycle.isBusy,
+            isTaskRunning: store.isTaskRunning
+          )
+          .equatable()
+          Spacer(minLength: 0)
+        }
+        .contentShape(.interaction, .rect)
+        .accessibilityAddTraits(.isButton)
+        // Simultaneous so the List row still selects on the same click; the
+        // trailing controls (bell, expander) sit outside this area so their
+        // clicks don't double-toggle.
+        .simultaneousGesture(TapGesture().onEnded { toggleTabListFromRowClick() })
         TrailingView(
           store: store,
           shortcutHint: shortcutHint,
@@ -89,6 +98,17 @@ struct SidebarItemView: View {
     .listRowInsets(.leading, CGFloat(nestDepth) * SidebarNestLayout.indentStep)
     .listRowInsets(.trailing, 4)
     .listRowInsets(.vertical, 6)
+  }
+
+  /// Row-body click on a multi-tab worktree toggles the per-tab sub-rows, so
+  /// the whole title area works as the expander (the trailing chevron stays as
+  /// the explicit control). ⌘/⇧ clicks are selection gestures and skip it.
+  private func toggleTabListFromRowClick() {
+    guard showsSessionTitles, store.kind == .gitWorktree,
+      store.tabsSummary.tabs.count > 1,
+      NSEvent.modifierFlags.isDisjoint(with: [.command, .shift])
+    else { return }
+    store.send(.tabListExpansionToggled)
   }
 }
 
@@ -521,7 +541,9 @@ private struct TrailingView: View {
       pullRequest: showsPullRequestInfo ? store.pullRequest : nil,
     )
     let prText = display.pullRequestBadgeStyle?.text
-    let agents = store.agents
+    // While the tab list is expanded each sub-row carries its own agent mark,
+    // so the aggregated badge group leaves the parent row.
+    let agents = showsSessionTitles && store.isTabListExpanded ? [] : store.agents
     let scriptColors = store.runningScripts.map(\.tint)
     let showsNotificationIndicator = store.hasUnseenNotifications
     let notifications = Array(store.notifications)
