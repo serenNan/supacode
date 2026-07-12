@@ -266,6 +266,12 @@ struct SupacodeApp: App {
         markNotificationRead: { worktreeID, notificationID in
           terminalManager.markNotificationRead(worktreeID: worktreeID, notificationID: notificationID)
         },
+        markAllNotificationsRead: {
+          terminalManager.markAllNotificationsRead()
+        },
+        dismissAllNotifications: {
+          terminalManager.dismissAllNotifications()
+        },
         hasInflightBlockingScripts: {
           terminalManager.hasInflightBlockingScripts
         },
@@ -565,5 +571,26 @@ struct SupacodeApp: App {
     .windowToolbarStyle(.unified)
     .defaultSize(width: 720, height: 640)
     .restorationBehavior(.disabled)
+    MenuBarExtra(isInserted: showMenuBarIcon) {
+      MenuBarNotificationsMenu(store: store)
+    } label: {
+      MenuBarNotificationsLabel(store: store)
+    }
+    .menuBarExtraStyle(.menu)
+  }
+
+  /// Settings-backed insertion so toggling the preference (or Cmd-dragging the
+  /// icon out of the menu bar) adds/removes the status item live.
+  private var showMenuBarIcon: Binding<Bool> {
+    Binding(
+      get: { store.settings.showMenuBarIcon },
+      set: { newValue in
+        // MenuBarExtra re-writes the current value on every scene evaluation;
+        // only a real flip may reach the store or the persist round-trip
+        // re-evaluates the scene and loops the app at launch.
+        guard newValue != store.settings.showMenuBarIcon else { return }
+        store.send(.settings(.setShowMenuBarIcon(newValue)))
+      }
+    )
   }
 }

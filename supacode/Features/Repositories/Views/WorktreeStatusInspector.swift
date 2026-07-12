@@ -742,15 +742,10 @@ private struct NotificationRow: View {
 
   var body: some View {
     // Notification titles are the agent slug ("claude", "codex", …) when the
-    // notification came from an agent; show its mark, headlined by the session
-    // (tab) title when one exists, else the agent display name. Non-agent
-    // notifications keep their own title (it's real content, not a slug).
+    // notification came from an agent; show its mark, headlined by the
+    // resolved session/agent title.
     let agent = SkillAgent(rawValue: notification.title.lowercased())
-    let fallbackTitle = agent?.displayName ?? (notification.title.isEmpty ? "Terminal" : notification.title)
-    // An unrenamed tab is titled with the bare process name ("claude"); map
-    // that back to the display name rather than headlining the raw slug.
-    let resolvedSessionTitle = sessionTitle.map { SkillAgent(rawValue: $0.lowercased())?.displayName ?? $0 }
-    let title = (agent != nil ? resolvedSessionTitle : nil) ?? fallbackTitle
+    let title = notification.headline(sessionTitle: sessionTitle)
     Button {
       onSelect(worktreeID, notification)
     } label: {

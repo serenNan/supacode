@@ -208,6 +208,11 @@ struct AppFeature {
     case selectTerminalTabAtIndex(Int)
     case splitTerminal(TerminalSplitMenuDirection)
     case jumpToLatestUnread
+    case menuBarNotificationSelected(
+      worktreeID: Worktree.ID, tabID: TerminalTabID?, surfaceID: UUID, notificationID: UUID)
+    case showNotificationsPane
+    case markAllNotificationsRead
+    case clearAllNotifications
     case runScript
     case runNamedScript(ScriptDefinition)
     case stopScript(ScriptDefinition)
@@ -744,6 +749,51 @@ struct AppFeature {
             )
             await terminalClient.markNotificationRead(location.worktreeID, location.notificationID)
           }
+        )
+
+      case .menuBarNotificationSelected(let worktreeID, let tabID, let surfaceID, let notificationID):
+        guard let worktree = state.repositories.worktree(for: worktreeID) else {
+          jumpLogger.warning(
+            "menuBarNotificationSelected: worktree \(worktreeID) vanished between menu render and click."
+          )
+          return .none
+        }
+        analyticsClient.capture("menu_bar_notification_selected", nil)
+        // The notification may predate a tab move; re-resolve the surface's
+        // current tab when the recorded one is gone. A nil resolution means
+        // the surface closed — still surface the app and mark the item read.
+        let resolvedTabID = tabID ?? terminalClient.tabID(worktreeID, surfaceID)
+        return .merge(
+          .send(.repositories(.selectWorktree(worktreeID, focusTerminal: true))),
+          .run { @MainActor _ in
+            NSApplication.shared.surfaceMainWindow()
+            if let resolvedTabID {
+              terminalClient.send(.focusSurface(worktree, tabID: resolvedTabID, surfaceID: surfaceID))
+            }
+            terminalClient.markNotificationRead(worktreeID, notificationID)
+          }
+        )
+
+      case .showNotificationsPane:
+        let surfaceWindow: Effect<Action> = .run { @MainActor _ in
+          NSApplication.shared.surfaceMainWindow()
+        }
+        // Toggle only when the notifications pane isn't already up, so a
+        // second menu invocation surfaces the window instead of closing it.
+        if state.repositories.inspectorPresented, state.repositories.inspectorPane == .notifications {
+          return surfaceWindow
+        }
+        return .merge(surfaceWindow, .send(.repositories(.toggleInspectorPane(.notifications))))
+
+      case .markAllNotificationsRead:
+        analyticsClient.capture("notifications_mark_all_read", nil)
+        return .run { _ in await terminalClient.markAllNotificationsRead() }
+
+      case .clearAllNotifications:
+        analyticsClient.capture("notifications_clear_all", nil)
+        return .merge(
+          .send(.repositories(.dismissAllIssueNotifications)),
+          .run { _ in await terminalClient.dismissAllNotifications() }
         )
 
       case .runScript:

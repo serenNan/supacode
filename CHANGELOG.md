@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-07-12 菜单栏通知项（仿 cmux）
+- 新增 macOS 菜单栏铃铛（`MenuBarExtra` `.menu` 样式），存在未读通知时图标变 `bell.badge`；下拉列出最近 ≤10 条未读（terminal 通知显示会话名/摘要/相对时间，issue 通知显示标题/仓库名），点击条目激活 app、选中 worktree、聚焦对应 surface 并标已读（issue 条目开 GitHub 并标已读）
+- 菜单快捷操作：显示通知面板（激活主窗并开 inspector Notifications 页，已打开时不反向 toggle）/ 跳转到最新未读（复用 ⇧⌘U 逻辑）/ 全部标记为已读 / 全部清除（terminal + issue 一起清）；底部：检查更新 / 设置 / 退出
+- 设置 → Notifications 新增 "Show menu bar icon" 开关（`GlobalSettings.showMenuBarIcon` 默认开，旧设置文件 `decodeIfPresent` 兼容；Cmd 拖出菜单栏图标也会同步关掉该设置）
+- 踩坑记录：`MenuBarExtra(isInserted:)` 每次 scene 求值都会回写 binding，若走 BindingReducer 的 persist 路径会形成 scene→persist→scene 死循环把 app 启动卡死（测试宿主 hang 即此因）；改为专用 `setShowMenuBarIcon` action，reducer 与 App 侧 binding 双层同值去重
+- 复用现有通知系统：数据源 `toolbarNotificationGroupsCache`（新增 `MenuBarNotificationList` 纯派生 + 抽取 headline 解析为 `WorktreeTerminalNotification.headline(sessionTitle:)` 供 inspector 共用）；manager 新增 `markAllNotificationsRead`/`dismissAllNotifications` 并经 TerminalClient 桥接
+- 新增测试 17 条（MenuBarNotificationListTests 7、AppFeatureMenuBarNotificationsTests 6、设置解码/往返/binding/action 4）；OpenSpec 工件在 `openspec/changes/add-menu-bar-notifications/`
+
 ## 2026-07-12 通知面板按会话折叠
 - 通知 inspector 里同一会话（tab）的多条通知默认折叠：只显示最新一条，其余收进 "Show N Older" 展开控件，点开内联显示完整历史；纯 UI 折叠，不删任何通知数据（区别于已 revert 的"每 tab 只留一条"23f768df）
 - 折叠时若隐藏的旧通知里有未读，控件上带橙点 + "N unread" 提示，未读永不被折叠吞掉；铃铛计数语义不变
