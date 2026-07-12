@@ -9,10 +9,18 @@ struct AgentPresenceFeature {
   /// Activity state per (surface, agent). Set atomically by the wire events
   /// `busy` / `awaiting_input` / `idle`. The agent's Stop equivalent fires
   /// `idle`; `awaiting_input` is an explicit prompt the user must answer.
+  ///
+  /// `errored` and `compacting` ride the same atomic-set channel. `errored`
+  /// (Claude API/connection error at turn end) is sticky: no `idle` follows the
+  /// error, so it persists until the next `busy` / `session_start` (restart) or
+  /// an explicit `clearError` (tab focus) overwrites it. `compacting`
+  /// (`PreCompact`) is transient: the turn's next `busy` / `idle` clears it.
   enum Activity: String, Sendable, Equatable {
     case awaitingInput
     case busy
     case idle
+    case errored
+    case compacting
   }
 
   /// One badge worth of state. Surface ID is redundant; callers scope by surface set.
@@ -59,6 +67,9 @@ struct AgentPresenceFeature {
     case stop
     case surfaceClosed(UUID)
     case surfacesClosed(Set<UUID>)
+    /// Clear the sticky `errored` activity on these surfaces (the user focused the
+    /// tab). Records return to `idle`; a still-dead agent re-errors on its next Stop.
+    case clearError(surfaces: Set<UUID>)
     /// Stage records for the off-main liveness pass. Apply lands as
     /// `restoreFromSnapshotChecked` so `kill(2)` never runs on the main actor.
     case restoreFromSnapshot(staged: [PresenceKey: StagedRestore])
@@ -132,6 +143,10 @@ struct AgentPresenceFeature {
         Self.drop(surfaces: ids, from: &state)
         return Self.surfacesChangedEffect(ids)
 
+      case .clearError(let surfaces):
+        let changed = Self.clearErrors(on: surfaces, into: &state)
+        return Self.surfacesChangedEffect(changed)
+
       case .restoreFromSnapshot(let staged):
         guard !staged.isEmpty else { return .none }
         return .run { send in
@@ -171,9 +186,11 @@ struct AgentPresenceFeature {
       if let pid = event.pid {
         var record = state.records[key] ?? PresenceRecord(pids: [])
         let inserted = record.pids.insert(pid).inserted
+        // A restart clears a sticky error/compaction left on the prior turn.
+        let cleared = Self.normalizeStickyOnRestart(&record)
         state.records[key] = record
         rebuildPresence(forSurface: event.surfaceID, in: &state)
-        return inserted ? [event.surfaceID] : []
+        return (inserted || cleared) ? [event.surfaceID] : []
       }
       // Pid-less OSC seed: don't clobber a record that already carries a pid.
       guard state.records[key] == nil else { return [] }
@@ -204,9 +221,37 @@ struct AgentPresenceFeature {
       return applyActivity(.awaitingInput, event: event, key: key, into: &state) ? [event.surfaceID] : []
     case .idle:
       return applyActivity(.idle, event: event, key: key, into: &state) ? [event.surfaceID] : []
+    case .apiError:
+      return applyActivity(.errored, event: event, key: key, into: &state) ? [event.surfaceID] : []
+    case .compacting:
+      return applyActivity(.compacting, event: event, key: key, into: &state) ? [event.surfaceID] : []
     case .notification, .none:
       return []
     }
+  }
+
+  /// A restart (`session_start`) resets a sticky `errored` / `compacting` record
+  /// back to `idle`; other activities are left untouched. Returns whether it
+  /// changed anything, so the caller can report the surface as dirty even when no
+  /// new pid was inserted.
+  private static func normalizeStickyOnRestart(_ record: inout PresenceRecord) -> Bool {
+    guard record.activity == .errored || record.activity == .compacting else { return false }
+    record.activity = .idle
+    return true
+  }
+
+  /// Reset the sticky `errored` activity to `idle` on the given surfaces (tab
+  /// focus). Returns the surfaces whose record actually flipped.
+  private static func clearErrors(on surfaces: Set<UUID>, into state: inout State) -> Set<UUID> {
+    var changed: Set<UUID> = []
+    for (key, record) in state.records
+    where surfaces.contains(key.surfaceID) && record.activity == .errored {
+      var updated = record
+      updated.activity = .idle
+      state.records[key] = updated
+      changed.insert(key.surfaceID)
+    }
+    return changed
   }
 
   /// Auto-seed only on the OSC path (pid == nil), and only when the activity
@@ -401,6 +446,25 @@ extension AgentPresenceFeature.State {
     let surfaceSet = Set(surfaceIDs)
     return records.contains { entry in
       entry.value.activity == .busy && surfaceSet.contains(entry.key.surfaceID)
+    }
+  }
+
+  /// Any agent on the listed surfaces ended its turn in an API error (sticky
+  /// until restart / focus). Badge-independent — the "needs manual restart"
+  /// warning must show even when avatar badges are disabled.
+  func hasError(in surfaceIDs: some Sequence<UUID>) -> Bool {
+    let surfaceSet = Set(surfaceIDs)
+    return records.contains { entry in
+      entry.value.activity == .errored && surfaceSet.contains(entry.key.surfaceID)
+    }
+  }
+
+  /// Any agent on the listed surfaces is compacting its context (`PreCompact`).
+  /// Badge-independent, like `hasActivity`.
+  func isCompacting(in surfaceIDs: some Sequence<UUID>) -> Bool {
+    let surfaceSet = Set(surfaceIDs)
+    return records.contains { entry in
+      entry.value.activity == .compacting && surfaceSet.contains(entry.key.surfaceID)
     }
   }
 }

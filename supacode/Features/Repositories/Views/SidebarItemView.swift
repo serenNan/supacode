@@ -526,11 +526,21 @@ private struct TrailingView: View {
     let removed = store.removedLines ?? 0
     let hasStats = added + removed > 0
     let hasStatus = !scriptColors.isEmpty || showsNotificationIndicator
+    let hasAgentError = store.hasAgentError
+    // Error supersedes the compacting mark (a broken turn isn't compacting).
+    let isCompacting = store.isCompacting && !hasAgentError
 
     // Cross-fade via opacity so flipping ⌘ doesn't snap the row.
     HStack(spacing: 6) {
       ZStack(alignment: .trailing) {
         HStack(spacing: 6) {
+          if hasAgentError {
+            AgentErrorBadge()
+              .equatable()
+          } else if isCompacting {
+            CompactingIndicator()
+              .equatable()
+          }
           if store.kind == .folder, let host = store.host {
             Image(systemName: "wifi")
               .imageScale(.small)
@@ -632,6 +642,53 @@ private struct RunningAgentsBadgeContent: View, Equatable {
 
   var body: some View {
     AgentAvatarGroupView(instances: agents, size: 16)
+  }
+}
+
+/// Red warning badge for a session whose agent ended its turn in an API /
+/// connection error and needs a manual restart. Deliberately distinct from the
+/// orange unread-notification dot: a broken session is a call to action, not
+/// just unread output.
+private struct AgentErrorBadge: View, Equatable {
+  var body: some View {
+    Image(systemName: "exclamationmark.triangle.fill")
+      .imageScale(.small)
+      .font(.caption)
+      .foregroundStyle(.red)
+      .help("Agent hit an API error — needs a manual restart")
+      .accessibilityLabel("Agent error, needs manual restart")
+      .transition(.blurReplace)
+  }
+}
+
+/// Subtle transient mark shown while an agent compacts its context
+/// (`PreCompact`). No error styling and no priority float — compaction
+/// self-resolves when the turn resumes.
+private struct CompactingIndicator: View, Equatable {
+  @State private var spinning = false
+  // `==` ignores @State / @Environment; SwiftUI tracks those separately. The
+  // indicator carries no props, so two instances are always equal.
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  static func == (lhs: Self, rhs: Self) -> Bool { true }
+
+  var body: some View {
+    Image(systemName: "arrow.triangle.2.circlepath")
+      .imageScale(.small)
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      // Continuous clockwise spin reads as "compacting / working". Only renders
+      // during compaction, so the repeating animation lives just for that window.
+      .rotationEffect(.degrees(spinning ? 360 : 0))
+      .onAppear {
+        guard !reduceMotion else { return }
+        withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+          spinning = true
+        }
+      }
+      .help("Compacting context…")
+      .accessibilityLabel("Compacting context")
+      .transition(.blurReplace)
   }
 }
 

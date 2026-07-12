@@ -17,26 +17,30 @@ nonisolated enum ClaudeHookSettingsError: Error {
 
 // MARK: - Hook payload.
 
-// Atomic state-set: UserPromptSubmit / PreToolUse fire `busy`; PostToolUse
-// fires `idle` so the shimmer tracks active tool execution, not the whole turn
-// (the socket debounces idle to bridge between-tool gaps). AskUserQuestion /
-// ExitPlanMode / Notification overwrite to `awaitingInput`; Stop and SessionEnd
-// reset to `idle`. The pid liveness sweep is the safety net for crashed turns.
-// Only Claude has tool-level granularity; Codex and Kiro stay turn-level, so
-// their shimmer spans the whole turn.
+// Atomic state-set: UserPromptSubmit / PreToolUse / PostToolUse all fire `busy`
+// so the shimmer spans the whole turn — a finished tool doesn't end the turn
+// (the model keeps thinking / writing between tools), and PostToolUse also
+// re-asserts `busy` to clear an `awaitingInput` left by an answered
+// AskUserQuestion / ExitPlanMode. AskUserQuestion / ExitPlanMode / Notification
+// overwrite to `awaitingInput`; only Stop and SessionEnd reset to `idle`. The
+// pid liveness sweep is the safety net for crashed turns. Codex and Kiro are
+// already turn-level, so every agent's shimmer now spans the whole turn.
 private nonisolated struct ClaudeHooksPayload: Encodable {
   static let awaitingInputToolMatcher = "AskUserQuestion|ExitPlanMode"
 
   private static let busy = AgentHookSettingsCommand.compositeCommand(
     events: [.busy], forwardStdinAsNotification: false, agent: .claude)
-  private static let idle = AgentHookSettingsCommand.compositeCommand(
-    events: [.idle], forwardStdinAsNotification: false, agent: .claude)
   private static let awaitingInputAndNotify = AgentHookSettingsCommand.compositeCommand(
     events: [.awaitingInput], forwardStdinAsNotification: true, agent: .claude)
   private static let awaitingInput = AgentHookSettingsCommand.compositeCommand(
     events: [.awaitingInput], forwardStdinAsNotification: false, agent: .claude)
-  private static let idleAndNotify = AgentHookSettingsCommand.compositeCommand(
-    events: [.idle], forwardStdinAsNotification: true, agent: .claude)
+  // Stop probes the transcript for a current-turn API error and emits `.apiError`
+  // instead of `.idle` when found; the notify leg still fires. See claudeStopCommand.
+  private static let stop = AgentHookSettingsCommand.claudeStopCommand(agent: .claude)
+  // PreCompact = context compaction started; transient app-side. PostCompact is
+  // intentionally NOT mapped (compaction finishing is not turn completion).
+  private static let compacting = AgentHookSettingsCommand.compositeCommand(
+    events: [.compacting], forwardStdinAsNotification: false, agent: .claude)
   private static let sessionStart = AgentHookSettingsCommand.compositeCommand(
     events: [.sessionStart], forwardStdinAsNotification: false, agent: .claude)
   private static let sessionEndAndIdle = AgentHookSettingsCommand.compositeCommand(
@@ -58,13 +62,16 @@ private nonisolated struct ClaudeHooksPayload: Encodable {
       ),
     ],
     "PostToolUse": [
-      .init(matcher: "", hooks: [.init(command: Self.idle, timeout: 5)])
+      .init(matcher: "", hooks: [.init(command: Self.busy, timeout: 5)])
     ],
     "Notification": [
       .init(matcher: "", hooks: [.init(command: Self.awaitingInputAndNotify, timeout: 10)])
     ],
+    "PreCompact": [
+      .init(hooks: [.init(command: Self.compacting, timeout: 5)])
+    ],
     "Stop": [
-      .init(hooks: [.init(command: Self.idleAndNotify, timeout: 10)])
+      .init(hooks: [.init(command: Self.stop, timeout: 10)])
     ],
     "SessionEnd": [
       .init(matcher: "", hooks: [.init(command: Self.sessionEndAndIdle, timeout: 5)])

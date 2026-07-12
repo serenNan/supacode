@@ -103,6 +103,14 @@ struct SidebarItemFeature {
 
     var agents: [AgentPresenceFeature.AgentInstance] = []
     var hasAgentActivity: Bool = false
+    /// Sticky: an agent on this row ended its turn in an API/connection error and
+    /// needs a manual restart. Drives the red warning badge and the top-priority
+    /// Active-rail bucket. Cleared when the agent restarts (goes busy) or the tab
+    /// is focused. Badge-independent (shows even with avatar badges disabled).
+    var hasAgentError: Bool = false
+    /// An agent on this row is compacting its context (`PreCompact`). Transient;
+    /// drives a subtle indicator, not the error styling or priority float.
+    var isCompacting: Bool = false
     /// Running agents grouped by terminal tab, fed by the parent's
     /// agent-presence fan-out. Read by the expanded per-tab sub-rows so each
     /// row can show its own agent mark instead of the generic tab icon.
@@ -136,7 +144,8 @@ struct SidebarItemFeature {
     case diffStatsChanged(added: Int?, removed: Int?)
     case pullRequestQueryStarted(branch: String)
     case pullRequestChanged(GithubPullRequest?, branchAtQueryTime: String)
-    case agentSnapshotChanged([AgentPresenceFeature.AgentInstance], hasActivity: Bool)
+    case agentSnapshotChanged(
+      [AgentPresenceFeature.AgentInstance], hasActivity: Bool, hasError: Bool, isCompacting: Bool)
     case tabAgentsChanged([TerminalTabID: [AgentPresenceFeature.AgentInstance]])
     case terminalProjectionChanged(WorktreeRowProjection)
     case tabsSnapshotChanged(WorktreeTabsSummary)
@@ -178,10 +187,14 @@ struct SidebarItemFeature {
         state.pullRequestBranchAtQueryTime = nil
         return .none
 
-      case .agentSnapshotChanged(let agents, let hasActivity):
-        guard state.agents != agents || state.hasAgentActivity != hasActivity else { return .none }
+      case .agentSnapshotChanged(let agents, let hasActivity, let hasError, let isCompacting):
+        guard state.agents != agents || state.hasAgentActivity != hasActivity
+          || state.hasAgentError != hasError || state.isCompacting != isCompacting
+        else { return .none }
         state.agents = agents
         state.hasAgentActivity = hasActivity
+        state.hasAgentError = hasError
+        state.isCompacting = isCompacting
         return .none
 
       case .tabAgentsChanged(let tabAgents):

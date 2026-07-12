@@ -395,6 +395,13 @@ struct AppFeature {
           repositoryName: state.repositories.repositories
             .first { $0.worktrees[id: worktree.id] != nil }?.name
         )
+        // Focusing a broken session clears its "needs restart" warning: the user
+        // is now looking at it. A still-dead agent re-errors on its next Stop.
+        let focusedSurfaceIDs = state.repositories.sidebarItems[id: worktreeID]?.surfaceIDs ?? []
+        let clearErrorEffect: Effect<Action> =
+          state.agentPresence.hasError(in: focusedSurfaceIDs)
+          ? .send(.agentPresence(.clearError(surfaces: Set(focusedSurfaceIDs))))
+          : .none
         return .merge(
           .run { _ in
             await terminalClient.send(.setSelectedWorktreeID(worktree.id))
@@ -403,7 +410,8 @@ struct AppFeature {
             await worktreeInfoWatcher.send(.setSelectedWorktreeID(worktree.id))
           },
           .send(.worktreeSettingsLoaded(settings, worktreeID: worktreeID)),
-          .send(.todoPanel(.selectionChanged(todoSelection)))
+          .send(.todoPanel(.selectionChanged(todoSelection))),
+          clearErrorEffect
         )
 
       case .repositories(.delegate(.worktreeCreated(let worktree))):
@@ -1619,11 +1627,18 @@ struct AppFeature {
       guard let row = state.repositories.sidebarItems[id: rowID] else { continue }
       let agents = presence.agents(across: row.surfaceIDs, badgesEnabled: badgesEnabled)
       let hasActivity = presence.hasActivity(in: row.surfaceIDs)
+      // Error / compaction are badge-independent: the "needs restart" warning
+      // and the compacting mark show even when avatar badges are disabled.
+      let hasError = presence.hasError(in: row.surfaceIDs)
+      let isCompacting = presence.isCompacting(in: row.surfaceIDs)
       effects.append(
         .send(
           .repositories(
             .sidebarItems(
-              .element(id: rowID, action: .agentSnapshotChanged(agents, hasActivity: hasActivity))
+              .element(
+                id: rowID,
+                action: .agentSnapshotChanged(
+                  agents, hasActivity: hasActivity, hasError: hasError, isCompacting: isCompacting))
             )
           )
         )

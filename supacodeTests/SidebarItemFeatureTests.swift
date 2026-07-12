@@ -71,15 +71,41 @@ struct SidebarItemFeatureTests {
       agent: .claude,
       activity: .busy
     )
-    await store.send(.agentSnapshotChanged([instance], hasActivity: true)) {
+    await store.send(.agentSnapshotChanged([instance], hasActivity: true, hasError: false, isCompacting: false)) {
       $0.agents = [instance]
       $0.hasAgentActivity = true
     }
     // Same payload: no-op.
-    await store.send(.agentSnapshotChanged([instance], hasActivity: true))
+    await store.send(.agentSnapshotChanged([instance], hasActivity: true, hasError: false, isCompacting: false))
     // hasActivity flip only.
-    await store.send(.agentSnapshotChanged([instance], hasActivity: false)) {
+    await store.send(.agentSnapshotChanged([instance], hasActivity: false, hasError: false, isCompacting: false)) {
       $0.hasAgentActivity = false
+    }
+  }
+
+  @Test func agentErrorAndCompactingFlagsTrackSnapshot() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .errored)
+    // API error sets the sticky warning flag.
+    await store.send(.agentSnapshotChanged([instance], hasActivity: false, hasError: true, isCompacting: false)) {
+      $0.agents = [instance]
+      $0.hasAgentError = true
+    }
+    // Compaction is orthogonal and transient.
+    let compacting = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .compacting)
+    await store.send(.agentSnapshotChanged([compacting], hasActivity: false, hasError: false, isCompacting: true)) {
+      $0.agents = [compacting]
+      $0.hasAgentError = false
+      $0.isCompacting = true
+    }
+    // Restart (busy) clears both.
+    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    await store.send(.agentSnapshotChanged([busy], hasActivity: true, hasError: false, isCompacting: false)) {
+      $0.agents = [busy]
+      $0.hasAgentActivity = true
+      $0.isCompacting = false
     }
   }
 
