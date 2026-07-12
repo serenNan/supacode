@@ -43,6 +43,9 @@ extension RepositoriesFeature {
     var filePath: String
     var diff: GitFileDiff? = nil
     var error: String? = nil
+    /// 1-based line in the new file to scroll to once the diff loads (from a
+    /// terminal `path:line` click). Nil for taps in the History pane itself.
+    var targetLine: Int?
   }
 
   @CasePathable
@@ -56,7 +59,7 @@ extension RepositoriesFeature {
     case uncommittedTapped
     case uncommittedFilesLoaded(worktreeID: Worktree.ID, [GitCommitFileChange])
     case uncommittedFilesFailed(worktreeID: Worktree.ID, message: String)
-    case fileTapped(source: PresentedFileDiff.Source, path: String)
+    case fileTapped(source: PresentedFileDiff.Source, path: String, line: Int?)
     case fileDiffLoaded(
       worktreeID: Worktree.ID, source: PresentedFileDiff.Source, path: String, GitFileDiff)
     case fileDiffFailed(
@@ -180,13 +183,13 @@ extension RepositoriesFeature {
         state.gitHistory?.uncommittedFilesError = message
         return .none
 
-      case .gitHistory(.fileTapped(let source, let path)):
+      case .gitHistory(.fileTapped(let source, let path, let line)):
         guard var history = state.gitHistory,
           let worktree = state.worktree(for: history.worktreeID)
         else {
           return .none
         }
-        history.presentedDiff = PresentedFileDiff(source: source, filePath: path)
+        history.presentedDiff = PresentedFileDiff(source: source, filePath: path, targetLine: line)
         state.gitHistory = history
         let client = historyGitClient(for: worktree)
         let worktreeURL = worktree.workingDirectory

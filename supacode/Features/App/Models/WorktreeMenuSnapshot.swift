@@ -103,6 +103,7 @@ extension AppFeature.Action {
         return true
       case .notificationReceived, .tabCreated, .tabClosed, .focusChanged,
         .taskStatusChanged, .blockingScriptCompleted, .commandPaletteToggleRequested,
+        .fileReferenceClicked,
         .setupScriptConsumed, .worktreeProjectionChanged, .worktreeTabsChanged,
         .tabProjectionChanged,
         .tabRemoved, .worktreeStateTornDown, .tabProgressDisplayChanged,

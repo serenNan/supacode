@@ -77,7 +77,8 @@ struct WorktreeFileDiffSheetView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        GitDiffContentView(diff: diff, lineCap: Self.maxRenderedLines)
+        GitDiffContentView(
+          diff: diff, lineCap: Self.maxRenderedLines, targetLine: presented.targetLine)
       }
     } else {
       VStack(spacing: 10) {
@@ -93,24 +94,44 @@ struct WorktreeFileDiffSheetView: View {
 private struct GitDiffContentView: View {
   let diff: GitFileDiff
   let lineCap: Int
+  let targetLine: Int?
 
   var body: some View {
     let (rows, isTruncated) = Self.rows(for: diff, cap: lineCap)
-    ScrollView {
-      LazyVStack(alignment: .leading, spacing: 0) {
-        ForEach(rows) { row in
-          GitDiffRowView(row: row)
+    ScrollViewReader { proxy in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 0) {
+          ForEach(rows) { row in
+            GitDiffRowView(row: row)
+          }
+          if isTruncated {
+            Text("Diff truncated: showing the first \(lineCap) lines.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(8)
+          }
         }
-        if isTruncated {
-          Text("Diff truncated: showing the first \(lineCap) lines.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(8)
-        }
+        .padding(.vertical, 6)
       }
-      .padding(.vertical, 6)
+      .onAppear {
+        guard let targetLine,
+          let rowID = Self.targetRowID(in: rows, line: targetLine)
+        else { return }
+        proxy.scrollTo(rowID, anchor: .center)
+      }
     }
     .background(.background)
+  }
+
+  /// The first rendered line at or after `line` in the new file; nil when the
+  /// target lies beyond every rendered hunk (including past the line cap).
+  static func targetRowID(in rows: [GitDiffDisplayRow], line: Int) -> Int? {
+    rows.first { row in
+      if case .line(let diffLine) = row.kind, let newNumber = diffLine.newNumber {
+        return newNumber >= line
+      }
+      return false
+    }?.id
   }
 
   static func rows(for diff: GitFileDiff, cap: Int) -> (rows: [GitDiffDisplayRow], isTruncated: Bool) {

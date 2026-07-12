@@ -1289,6 +1289,10 @@ struct AppFeature {
       case .terminalEvent(.setupScriptConsumed(let worktreeID)):
         return .send(.repositories(.consumeSetupScript(worktreeID)))
 
+      case .terminalEvent(.fileReferenceClicked(let worktreeID, let path, let line)):
+        return .send(
+          .repositories(.openTerminalFileReference(worktreeID: worktreeID, path: path, line: line)))
+
       case .terminalEvent(.blockingScriptCompleted(let worktreeID, let kind, let exitCode, let tabId)):
         switch kind {
         case .script:

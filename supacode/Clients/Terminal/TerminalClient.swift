@@ -75,6 +75,10 @@ struct TerminalClient {
     case blockingScriptCompleted(
       worktreeID: Worktree.ID, kind: BlockingScriptKind, exitCode: Int?, tabId: TerminalTabID?)
     case commandPaletteToggleRequested(worktreeID: Worktree.ID)
+    /// A clicked terminal link resolved to a file inside the worktree.
+    /// `path` is worktree-relative; `line` comes from a `path:line` suffix.
+    /// Routed to the History pane to present the file's uncommitted diff.
+    case fileReferenceClicked(worktreeID: Worktree.ID, path: String, line: Int?)
     case setupScriptConsumed(worktreeID: Worktree.ID)
     /// Per-worktree projection emitted when surfaces / task-running / unseen / notifications drift.
     /// Routed by the parent into the matching `SidebarItemFeature` via the row's id.

@@ -70,6 +70,10 @@ final class GhosttySurfaceBridge {
   // The agent's own OSC 9 desktop notification. Deduped against our richer custom
   // notification one layer up.
   var onDesktopNotification: ((String, String) -> Void)?
+  // Asked before the system opens a clicked link, with Ghostty's raw string
+  // (pre fileURL conversion, so relative `path:line` text survives intact).
+  // Returning true claims the click and skips NSWorkspace.
+  var onOpenURL: ((String) -> Bool)?
   // OSC 3008 context signal: (action 0=start/1=end, context id, raw key=value
   // metadata). Forwarded raw; the per-surface capability token carried in the
   // metadata is verified one layer up where the surface's nonce lives.
@@ -459,6 +463,9 @@ final class GhosttySurfaceBridge {
       state.openUrlKind = openUrl.kind
       let rawUrl = string(from: openUrl.url, length: openUrl.len)
       state.openUrl = rawUrl
+      if let rawUrl, onOpenURL?(rawUrl) == true {
+        return true
+      }
       if let request = ghosttyOpenURLRequest(urlString: rawUrl, kind: openUrl.kind) {
         SupaLogger("GhosttySurfaceBridge").debug("OPEN_URL raw=\(rawUrl ?? "nil") resolved=\(request.url)")
         NSWorkspace.shared.open(request.url)

@@ -522,6 +522,8 @@ extension RepositoriesFeature.Action {
       .sidebarTabRowSelected,
       .showToast, .dismissToast,
       .toggleInspectorPane, .setInspectorPresented,
+      // Inspector + gitHistory orchestration only; sidebar caches untouched.
+      .openTerminalFileReference,
       .delayedPullRequestRefresh,
       .openRepositorySettings, .requestCustomizeRepository,
       .requestCustomizeWorktree,

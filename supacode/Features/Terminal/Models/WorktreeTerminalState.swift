@@ -200,6 +200,10 @@ final class WorktreeTerminalState {
   /// Forwarded to the manager's `dispatchHookEvent` so an OSC-sourced presence
   /// event joins the same funnel as the socket path (idle-debounce, badge).
   var onAgentHookEvent: ((AgentHookEvent) -> Void)?
+  /// Fires when a clicked terminal link resolves to a file inside this
+  /// worktree: (worktree-relative path, optional 1-based line). Manager
+  /// forwards so the History pane can present the file's diff.
+  var onFileReferenceClicked: ((String, Int?) -> Void)?
   /// Fires when a tab's per-tab projection (surfaces / focus / unseen count)
   /// drifts. Manager forwards into `TerminalTabFeature.State` via
   /// `tabProjectionChanged` so the leaf observes a per-tab store.
@@ -1711,6 +1715,10 @@ final class WorktreeTerminalState {
       guard self.isLiveSurface(view) else { return }
       self.handleAgentOSCNotification(title: title, body: body, surfaceID: view.id)
     }
+    view.bridge.onOpenURL = { [weak self, weak view] rawUrl in
+      guard let self, let view, self.isLiveSurface(view) else { return false }
+      return self.handleOpenURL(rawUrl, from: view)
+    }
     view.bridge.onContextSignal = { [weak self, weak view] _, id, metadata in
       guard let self, let view else { return }
       guard self.isLiveSurface(view) else { return }
@@ -2105,6 +2113,29 @@ final class WorktreeTerminalState {
       )
     }
     appendNotification(title: title, body: body, surfaceID: surfaceID)
+  }
+
+  /// Claims a clicked terminal link when it resolves to a file inside this
+  /// (local) worktree: media/binary files open with the system default app
+  /// (the fallback opener mangles relative paths, so open the resolved
+  /// absolute path here); anything else is forwarded so the History pane can
+  /// show its diff. Unresolved links fall through to the system opener.
+  private func handleOpenURL(_ rawUrl: String, from view: GhosttySurfaceView) -> Bool {
+    guard worktree.host == nil else { return false }
+    guard
+      let reference = TerminalFileReference.resolve(
+        clicked: rawUrl,
+        pwd: view.bridge.state.pwd,
+        worktreeRoot: worktree.workingDirectory,
+        fileExists: { FileManager.default.fileExists(atPath: $0) }
+      )
+    else { return false }
+    if reference.prefersSystemOpen {
+      NSWorkspace.shared.open(worktree.workingDirectory.appending(path: reference.relativePath))
+      return true
+    }
+    onFileReferenceClicked?(reference.relativePath, reference.line)
+    return true
   }
 
   /// The agent's own OSC 9 desktop notification, a summary of the expanded custom

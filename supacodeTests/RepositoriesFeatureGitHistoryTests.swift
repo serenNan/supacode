@@ -523,7 +523,9 @@ struct RepositoriesFeatureGitHistoryTests {
       }
     }
 
-    await store.send(.gitHistory(.fileTapped(source: .uncommitted, path: "supacode/A.swift"))) {
+    await store.send(
+      .gitHistory(.fileTapped(source: .uncommitted, path: "supacode/A.swift", line: nil))
+    ) {
       $0.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
         source: .uncommitted, filePath: "supacode/A.swift")
     }
@@ -551,7 +553,7 @@ struct RepositoriesFeatureGitHistoryTests {
     }
 
     await store.send(
-      .gitHistory(.fileTapped(source: .commit(hash: Self.hash1), path: "README.md"))
+      .gitHistory(.fileTapped(source: .commit(hash: Self.hash1), path: "README.md", line: nil))
     ) {
       $0.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
         source: .commit(hash: Self.hash1), filePath: "README.md")
@@ -576,14 +578,15 @@ struct RepositoriesFeatureGitHistoryTests {
       }
     }
 
-    await store.send(.gitHistory(.fileTapped(source: .uncommitted, path: "A.swift"))) {
+    await store.send(.gitHistory(.fileTapped(source: .uncommitted, path: "A.swift", line: nil))) {
       $0.gitHistory?.presentedDiff = RepositoriesFeature.PresentedFileDiff(
         source: .uncommitted, filePath: "A.swift")
     }
     await store.receive(\.gitHistory.fileDiffFailed) {
-      $0.gitHistory?.presentedDiff?.error = GitClientError.commandFailed(
-        command: "git diff", message: "boom"
-      ).localizedDescription
+      $0.gitHistory?.presentedDiff?.error =
+        GitClientError.commandFailed(
+          command: "git diff", message: "boom"
+        ).localizedDescription
     }
   }
 

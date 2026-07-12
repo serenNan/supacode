@@ -128,7 +128,8 @@ private struct GitHistoryList: View {
               filesError: history.uncommittedFilesError,
               onTap: { repositoriesStore.send(.gitHistory(.uncommittedTapped)) },
               onFileTap: { path in
-                repositoriesStore.send(.gitHistory(.fileTapped(source: .uncommitted, path: path)))
+                repositoriesStore.send(
+                  .gitHistory(.fileTapped(source: .uncommitted, path: path, line: nil)))
               }
             )
           }
@@ -170,7 +171,7 @@ private struct GitHistoryList: View {
         onTap: { repositoriesStore.send(.gitHistory(.commitTapped(hash: commit.hash))) },
         onFileTap: { path in
           repositoriesStore.send(
-            .gitHistory(.fileTapped(source: .commit(hash: commit.hash), path: path)))
+            .gitHistory(.fileTapped(source: .commit(hash: commit.hash), path: path, line: nil)))
         }
       )
     }

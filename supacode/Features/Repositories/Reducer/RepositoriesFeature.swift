@@ -467,6 +467,10 @@ struct RepositoriesFeature {
     case dismissToast
     case toggleInspectorPane(WorktreeInspectorPane)
     case setInspectorPresented(Bool)
+    /// A terminal link click resolved to a file in the selected worktree
+    /// (path is worktree-relative). Opens the History pane and presents the
+    /// file's uncommitted diff, scrolled to `line` when present.
+    case openTerminalFileReference(worktreeID: Worktree.ID, path: String, line: Int?)
     case gitHistory(GitHistoryAction)
     case delayedPullRequestRefresh(Worktree.ID)
     case openRepositorySettings(Repository.ID)
@@ -2814,6 +2818,17 @@ struct RepositoriesFeature {
         state.inspectorPresented = presented
         return .none
 
+      case .openTerminalFileReference(let worktreeID, let path, let line):
+        // Clicks come from the selected worktree's visible terminal; anything
+        // else is stale and dropped rather than replaying selection side effects.
+        guard worktreeID == state.selectedWorktreeID else { return .none }
+        state.inspectorPane = .history
+        state.inspectorPresented = true
+        // The gitHistory reducer's default-arm reconciliation runs after this
+        // switch and seeds `gitHistory` for the now-visible pane, so the
+        // follow-up fileTapped lands on initialized state.
+        return .send(.gitHistory(.fileTapped(source: .uncommitted, path: path, line: line)))
+
       case .delayedPullRequestRefresh(let worktreeID):
         guard let worktree = state.worktree(for: worktreeID),
           let repositoryID = state.repositoryID(containing: worktreeID),
@@ -3959,7 +3974,7 @@ struct RepositoriesFeature {
         return .none
 
       case .pinWorktree, .unpinWorktree, .presentAlert, .showToast, .dismissToast, .delayedPullRequestRefresh,
-        .toggleInspectorPane, .setInspectorPresented,
+        .toggleInspectorPane, .setInspectorPresented, .openTerminalFileReference,
         .worktreeNotificationReceived, .worktreeInfoEvent:
         // Real handling lives in `worktreeNotificationReducer` (combined below) to keep `body`
         // under the type-checker's complexity limit.
