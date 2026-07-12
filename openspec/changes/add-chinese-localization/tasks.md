@@ -26,11 +26,11 @@
 
 ## 5. app 内语言选择器（设置 → General）
 
-- [ ] 5.1 定义语言偏好模型（枚举 `system`/`zh-Hans`/`en`），用 `@Shared(.appStorage("preferredLanguage"))` 持久化
-- [ ] 5.2 在 app 启动早期把 `preferredLanguage` 同步到 `UserDefaults.standard` 的 `AppleLanguages`（`system` 时移除该 key）
-- [ ] 5.3 在 `SettingsView.swift` General 段加语言 `Picker`，绑定偏好；改动后展示「重启后生效」提示与一键重启按钮
-- [ ] 5.4 实现一键重启（走 app 既有 relaunch-safe 收尾后 `Process` 拉起自身 + `NSApp.terminate`）；重启失败时提示手动重开
-- [ ] 5.5 为语言偏好写入 / 切「跟随系统」清除覆盖 / 触发重启的 reducer 逻辑补 TCA 测试（用 `TestClock`，不用 `Task.sleep`）
+- [x] 5.1 定义语言偏好模型（`AppLanguage` 枚举 `system`/`english`/`simplifiedChinese`），持久化到 `UserDefaults`（key `preferredLanguage`），映射写入 `AppleLanguages`
+- [x] 5.2 在 app 启动早期（`SupacodeApp.init()`）`AppLanguage.syncAtLaunch()` 把偏好同步到 `AppleLanguages`（`system` 时移除该 key）
+- [x] 5.3 在 `AppearanceSettingsView`（General 段）加语言 `Picker`，经 `.setPreferredLanguage` 绑定；改动后展示「需重启」说明与一键重启按钮
+- [x] 5.4 实现一键重启：`AppFeature` 消费 `.relaunchRequested` delegate → `AppRelauncher.relaunch()`（等本进程退出后 `open` 自身 + `NSApp.terminate` 走干净收尾）
+- [x] 5.5 补测试：`AppLanguageTests` + `SettingsFeatureLanguageTests`，全用 `defaultAppStorage` 隔离，无 `Task.sleep`
 
 ## 6. 巡检与验证
 
