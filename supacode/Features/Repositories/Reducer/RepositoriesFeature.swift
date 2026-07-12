@@ -153,12 +153,20 @@ struct RepositoriesFeature {
     /// they live here rather than fanning out to `sidebarItems` leaves. Only
     /// the inspector pane reads them.
     var issuesByRepositoryID: [Repository.ID: [GithubIssue]] = [:]
-    /// Previous poll's per-issue fields; diffed on each load to detect new
-    /// comments / label changes. A missing key means "never loaded" and seeds
-    /// silently so app launch doesn't storm the bell.
+    /// Issues the signed-in user is involved in (author / assignee / mentioned /
+    /// commenter). Feeds the inspector's "Mine" filter and is the sole source of
+    /// issue notifications — the repo-wide `issuesByRepositoryID` never notifies.
+    var involvedIssuesByRepositoryID: [Repository.ID: [GithubIssue]] = [:]
+    /// Previous poll's per-issue fields for the involved set; diffed on each load
+    /// to detect new comments / label / state changes. A missing key means
+    /// "never loaded" and seeds silently so app launch doesn't storm the bell.
     var issueSnapshotsByRepositoryID: [Repository.ID: [Int: RepositoryIssueSnapshot]] = [:]
     var inFlightIssueRefreshRepositoryIDs: Set<Repository.ID> = []
     var issueNotifications: IdentifiedArrayOf<RepositoryIssueNotification> = []
+    /// Signed-in GitHub login, cached from `authStatus()` and used to scope the
+    /// involved-issue query. `nil` until resolved (or when signed out), in which
+    /// case the involved set stays empty and no issue notifications fire.
+    var githubLogin: String?
     var sidebarSelectedWorktreeIDs: Set<Worktree.ID> = []
     var nextPendingSidebarRevealID = 0
     var pendingSidebarReveal: PendingSidebarReveal?
@@ -453,8 +461,9 @@ struct RepositoriesFeature {
       repositoryID: Repository.ID,
       pullRequestsByWorktreeID: [Worktree.ID: GithubPullRequest?]
     )
-    case repositoryIssuesLoaded(repositoryID: Repository.ID, issues: [GithubIssue])
+    case repositoryIssuesLoaded(repositoryID: Repository.ID, all: [GithubIssue], involved: [GithubIssue])
     case repositoryIssueRefreshCompleted(Repository.ID)
+    case githubLoginResolved(String?)
     case issueNotificationSelected(RepositoryIssueNotification.ID)
     case dismissAllIssueNotifications
     case setGithubIntegrationEnabled(Bool)
@@ -2136,6 +2145,9 @@ struct RepositoriesFeature {
         state.pendingPullRequestRefreshByRepositoryID.removeAll()
         return .merge(
           .cancel(id: CancelID.githubIntegrationRecovery),
+          // gh is available: resolve the signed-in login so involved-issue
+          // scoping works on the next poll.
+          resolveGithubLogin(),
           .merge(
             pendingRefreshes.map { pending in
               .send(
@@ -2233,13 +2245,17 @@ struct RepositoriesFeature {
         }
         return .merge(effects)
 
-      case .repositoryIssuesLoaded(let repositoryID, let issues):
+      case .repositoryIssuesLoaded(let repositoryID, let all, let involved):
         guard state.repositories[id: repositoryID] != nil else {
           return .none
         }
         let previousSnapshot = state.issueSnapshotsByRepositoryID[repositoryID]
-        state.issuesByRepositoryID[repositoryID] = issues
-        state.issueSnapshotsByRepositoryID[repositoryID] = RepositoryIssueUpdates.snapshot(of: issues)
+        state.issuesByRepositoryID[repositoryID] = all
+        state.involvedIssuesByRepositoryID[repositoryID] = involved
+        // Notifications diff only the involved set — never the repo-wide list,
+        // whose most-recently-updated window churns and would report unrelated
+        // issues as new.
+        state.issueSnapshotsByRepositoryID[repositoryID] = RepositoryIssueUpdates.snapshot(of: involved)
         @Shared(.settingsFile) var settingsFile
         guard previousSnapshot != nil, settingsFile.global.inAppNotificationsEnabled else {
           return .none
@@ -2248,7 +2264,8 @@ struct RepositoriesFeature {
           contentsOf: RepositoryIssueUpdates.notifications(
             repositoryID: repositoryID,
             previous: previousSnapshot,
-            issues: issues,
+            issues: involved,
+            login: state.githubLogin,
             uuid: { uuid() },
             now: now
           )
@@ -2257,6 +2274,10 @@ struct RepositoriesFeature {
 
       case .repositoryIssueRefreshCompleted(let repositoryID):
         state.inFlightIssueRefreshRepositoryIDs.remove(repositoryID)
+        return .none
+
+      case .githubLoginResolved(let login):
+        state.githubLogin = login
         return .none
 
       case .issueNotificationSelected(let notificationID):
@@ -2599,6 +2620,8 @@ struct RepositoriesFeature {
         state.queuedPullRequestRefreshByRepositoryID.removeAll()
         state.inFlightPullRequestRefreshRepositoryIDs.removeAll()
         state.inFlightPullRequestBranchSnapshotsByRepositoryID.removeAll()
+        // Drop the cached login so re-enabling re-resolves it (account may change).
+        state.githubLogin = nil
         let worktreeIDs = state.sidebarItems.compactMap { $0.pullRequest != nil ? $0.id : nil }
         var clearEffects: [Effect<Action>] = []
         for worktreeID in worktreeIDs {
@@ -3009,7 +3032,8 @@ struct RepositoriesFeature {
           state.inFlightIssueRefreshRepositoryIDs.insert(repository.id)
           return refreshRepositoryIssues(
             repositoryID: repository.id,
-            repositoryRootURL: repositoryRootURL
+            repositoryRootURL: repositoryRootURL,
+            login: state.githubLogin
           )
         }
       default:
@@ -3989,7 +4013,7 @@ struct RepositoriesFeature {
         .repositoryPullRequestRefreshCompleted, .worktreeBranchNameLoaded, .worktreeLineChangesLoaded,
         .repositoryPullRequestsLoaded, .pullRequestAction, .setGithubIntegrationEnabled, .setMergedWorktreeAction,
         .setAutoDeleteArchivedWorktreesAfterDays, .autoDeleteExpiredArchivedWorktrees, .setMoveNotifiedWorktreeToTop,
-        .repositoryIssuesLoaded, .repositoryIssueRefreshCompleted,
+        .repositoryIssuesLoaded, .repositoryIssueRefreshCompleted, .githubLoginResolved,
         .issueNotificationSelected, .dismissAllIssueNotifications:
         // Real handling lives in `githubIntegrationReducer` (combined below) to keep `body`
         // under the type-checker's complexity limit.
@@ -4231,9 +4255,23 @@ struct RepositoriesFeature {
     }
   }
 
+  /// Resolves the signed-in GitHub login from `authStatus()` and caches it.
+  /// Failures resolve to `nil`, leaving the involved set empty until the next
+  /// availability change re-resolves.
+  private func resolveGithubLogin() -> Effect<Action> {
+    let githubCLI = githubCLI
+    return .run { send in
+      // `try?` flattens the throwing call's optional return, so a resolved
+      // status is already non-optional here.
+      let status = try? await githubCLI.authStatus()
+      await send(.githubLoginResolved(status?.username))
+    }
+  }
+
   private func refreshRepositoryIssues(
     repositoryID: Repository.ID,
-    repositoryRootURL: URL
+    repositoryRootURL: URL,
+    login: String?
   ) -> Effect<Action> {
     let gitClient = gitClient
     let githubCLI = githubCLI
@@ -4244,12 +4282,19 @@ struct RepositoriesFeature {
         gitClient: gitClient
       ) {
         do {
-          let issues = try await githubCLI.listIssues(
+          let sets = try await githubCLI.listIssues(
             remoteInfo.host,
             remoteInfo.owner,
-            remoteInfo.repo
+            remoteInfo.repo,
+            login
           )
-          await send(.repositoryIssuesLoaded(repositoryID: repositoryID, issues: issues))
+          await send(
+            .repositoryIssuesLoaded(
+              repositoryID: repositoryID,
+              all: sets.all,
+              involved: sets.involved
+            )
+          )
         } catch {
           // Transient fetch failures self-heal on the next poll tick.
         }
@@ -4677,6 +4722,9 @@ struct RepositoriesFeature {
     let (filteredRemovingRepositoryIDs, filteredActiveRemovalBatches) =
       prunedRemovalTrackers(state: state, availableRepoIDs: repositoryIDs)
     state.issuesByRepositoryID = state.issuesByRepositoryID.filter { repositoryIDs.contains($0.key) }
+    state.involvedIssuesByRepositoryID = state.involvedIssuesByRepositoryID.filter {
+      repositoryIDs.contains($0.key)
+    }
     state.issueSnapshotsByRepositoryID = state.issueSnapshotsByRepositoryID.filter {
       repositoryIDs.contains($0.key)
     }

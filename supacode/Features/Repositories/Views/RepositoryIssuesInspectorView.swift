@@ -2,24 +2,39 @@ import ComposableArchitecture
 import SupacodeSettingsShared
 import SwiftUI
 
-/// Inspector section listing the repository's open GitHub issues. Reads the
-/// issue state in its own body so issue churn invalidates only this pane.
+/// Which issues the inspector lists: all open repository issues, or only the
+/// ones the signed-in user is involved in.
+enum IssueScope: String, CaseIterable, Identifiable {
+  case all = "All"
+  case mine = "Mine"
+  var id: Self { self }
+}
+
+/// Secondary open/closed filter, applied only within the Mine scope (the Mine
+/// set carries closed issues; the All set is open-only).
+enum IssueStateFilter: String, CaseIterable, Identifiable {
+  case all = "All"
+  case open = "Open"
+  case closed = "Closed"
+  var id: Self { self }
+}
+
+/// Inspector section listing the repository's GitHub issues. Reads the issue
+/// state in its own body so issue churn invalidates only this pane.
 struct RepositoryIssuesInspectorView: View {
   let repositoryID: Repository.ID?
   let repositoriesStore: StoreOf<RepositoriesFeature>
+  @State private var scope: IssueScope = .all
+  @State private var stateFilter: IssueStateFilter = .all
 
   var body: some View {
-    if let repositoryID, let issues = repositoriesStore.issuesByRepositoryID[repositoryID] {
-      if issues.isEmpty {
-        ContentUnavailableView(
-          "No Open Issues",
-          systemImage: "checkmark.circle",
-          description: Text("This repository has no open issues.")
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else {
-        IssuesListContent(issues: issues)
-      }
+    if let repositoryID, let allIssues = repositoriesStore.issuesByRepositoryID[repositoryID] {
+      IssuesPane(
+        scope: $scope,
+        stateFilter: $stateFilter,
+        allIssues: allIssues,
+        involvedIssues: repositoriesStore.involvedIssuesByRepositoryID[repositoryID] ?? []
+      )
     } else if repositoriesStore.githubIntegrationAvailability == .available {
       VStack(spacing: 10) {
         ProgressView()
@@ -38,8 +53,79 @@ struct RepositoryIssuesInspectorView: View {
   }
 }
 
+private struct IssuesPane: View {
+  @Binding var scope: IssueScope
+  @Binding var stateFilter: IssueStateFilter
+  let allIssues: [GithubIssue]
+  let involvedIssues: [GithubIssue]
+
+  private var displayedIssues: [GithubIssue] {
+    switch scope {
+    case .all:
+      return allIssues
+    case .mine:
+      switch stateFilter {
+      case .all: return involvedIssues
+      case .open: return involvedIssues.filter { !$0.isClosed }
+      case .closed: return involvedIssues.filter(\.isClosed)
+      }
+    }
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      filters
+      if displayedIssues.isEmpty {
+        emptyState
+      } else {
+        IssuesListContent(issues: displayedIssues, scope: scope)
+      }
+    }
+  }
+
+  private var filters: some View {
+    VStack(spacing: 8) {
+      Picker("Issue scope", selection: $scope) {
+        ForEach(IssueScope.allCases) { scope in
+          Text(scope.rawValue).tag(scope)
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .help("Show all open issues, or only the issues you're involved in.")
+
+      if scope == .mine {
+        Picker("Issue state", selection: $stateFilter) {
+          ForEach(IssueStateFilter.allCases) { state in
+            Text(state.rawValue).tag(state)
+          }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .help("Filter your issues by open or closed state.")
+      }
+    }
+    .padding(.horizontal)
+    .padding(.vertical, 8)
+  }
+
+  private var emptyState: some View {
+    ContentUnavailableView(
+      scope == .all ? "No Open Issues" : "No Issues Involve You",
+      systemImage: "checkmark.circle",
+      description: Text(
+        scope == .all
+          ? "This repository has no open issues."
+          : "No issues match this filter that you authored, were assigned, mentioned in, or commented on."
+      )
+    )
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
 private struct IssuesListContent: View {
   let issues: [GithubIssue]
+  let scope: IssueScope
 
   var body: some View {
     // One clock for every relative timestamp, ticking each minute.
@@ -50,7 +136,7 @@ private struct IssuesListContent: View {
             IssueRow(issue: issue, now: context.date)
           }
         } header: {
-          Text("\(issues.count) open \(issues.count == 1 ? "issue" : "issues")")
+          Text(headerLabel)
             .textCase(nil)
         }
       }
@@ -58,6 +144,12 @@ private struct IssuesListContent: View {
       // Let the window's terminal background (set in WindowChromeApplier) show through.
       .scrollContentBackground(.hidden)
     }
+  }
+
+  private var headerLabel: String {
+    let noun = issues.count == 1 ? "issue" : "issues"
+    // The All scope is open-only; the Mine scope can mix open and closed.
+    return scope == .all ? "\(issues.count) open \(noun)" : "\(issues.count) \(noun)"
   }
 }
 
@@ -76,6 +168,9 @@ private struct IssueRow: View {
     } label: {
       VStack(alignment: .leading, spacing: 4) {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+          Image(systemName: issue.isClosed ? "checkmark.circle" : "smallcircle.filled.circle")
+            .foregroundStyle(.secondary)
+            .help(issue.isClosed ? "Closed" : "Open")
           Text(verbatim: "#\(issue.number)")
             .foregroundStyle(.secondary)
             .monospaced()

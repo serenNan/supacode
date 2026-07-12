@@ -188,7 +188,10 @@ struct GithubCLIClient: Sendable {
   var latestRun: @Sendable (URL, String) async throws -> GithubWorkflowRun?
   var resolveRemoteInfo: @Sendable (URL) async -> GithubRemoteInfo?
   var batchPullRequests: @Sendable (String, String, String, [String]) async throws -> [String: GithubPullRequest]
-  var listIssues: @Sendable (String, String, String) async throws -> [GithubIssue]
+  /// Fetches the All set (repository open issues) and, when a signed-in login is
+  /// given, the involved set — both in one GraphQL request. `nil` login yields
+  /// an empty involved set.
+  var listIssues: @Sendable (_ host: String, _ owner: String, _ repo: String, _ involvesLogin: String?) async throws -> GithubIssueSets
   var mergePullRequest: @Sendable (URL, GithubRemoteInfo?, Int, PullRequestMergeStrategy) async throws -> Void
   var closePullRequest: @Sendable (URL, GithubRemoteInfo?, Int) async throws -> Void
   var markPullRequestReady: @Sendable (URL, GithubRemoteInfo?, Int) async throws -> Void
@@ -229,7 +232,7 @@ extension GithubCLIClient: DependencyKey {
     latestRun: { _, _ in nil },
     resolveRemoteInfo: { _ in nil },
     batchPullRequests: { _, _, _, _ in [:] },
-    listIssues: { _, _, _ in [] },
+    listIssues: { _, _, _, _ in .empty },
     mergePullRequest: { _, _, _, _ in },
     closePullRequest: { _, _, _ in },
     markPullRequestReady: { _, _, _ in },
@@ -805,21 +808,29 @@ nonisolated private func fetchPullRequestsChunk(
 nonisolated private func listIssuesFetcher(
   shell: ShellClient,
   resolver: GithubCLIExecutableResolver
-) -> @Sendable (String, String, String) async throws -> [GithubIssue] {
-  { host, owner, repo in
+) -> @Sendable (String, String, String, String?) async throws -> GithubIssueSets {
+  { host, owner, repo, involvesLogin in
     @Dependency(\.continuousClock) var clock
-    let arguments = [
+    var arguments = [
       "api",
       "graphql",
       "--hostname",
       host,
       "-f",
-      "query=\(GithubIssuesQuery.query)",
+      "query=\(GithubIssuesQuery.query(includeInvolved: involvesLogin != nil))",
       "-f",
       "owner=\(owner)",
       "-f",
       "repo=\(repo)",
     ]
+    if let involvesLogin {
+      // Bind the search string as a `-f` variable so the login can't break the
+      // query, and scope it to this repo's involved issues.
+      arguments.append(contentsOf: [
+        "-f",
+        "searchQuery=\(GithubIssuesQuery.involvesSearchQuery(owner: owner, repo: repo, login: involvesLogin))",
+      ])
+    }
     let output: String
     do {
       output = try await runGh(shell: shell, resolver: resolver, arguments: arguments, repoRoot: nil)
@@ -829,15 +840,16 @@ nonisolated private func listIssuesFetcher(
       output = try await runGh(shell: shell, resolver: resolver, arguments: arguments, repoRoot: nil)
     }
     guard !output.isEmpty else {
-      return []
+      return .empty
     }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
-    return try GithubCLIOutput.decode(
+    let response = try GithubCLIOutput.decode(
       GithubIssuesGraphQLResponse.self,
       from: output,
       decoder: decoder
-    ).issues
+    )
+    return GithubIssueSets(all: response.allIssues, involved: response.involvedIssues)
   }
 }
 
