@@ -75,6 +75,12 @@ public struct SettingsFeature {
     public var terminateSessionsOnQuit: Bool
     public var remoteSessionPersistenceEnabled: Bool
     public var showMenuBarIcon: Bool
+    /// Chosen UI language. Persisted outside `GlobalSettings` because it maps to
+    /// the system `AppleLanguages` key and is read at the earliest launch point.
+    public var preferredLanguage: AppLanguage = .system
+    /// The language active when this process launched. When it differs from
+    /// `preferredLanguage`, the UI offers a relaunch to apply the change.
+    public var launchLanguage: AppLanguage = .system
     public var cliInstallState = CLIInstallState.checking
     /// Aggregate per-agent install state for the unified integration row.
     public var agentIntegrationStates: [SkillAgent: AgentIntegrationRowState] = [:]
@@ -88,6 +94,12 @@ public struct SettingsFeature {
     /// the fallback sound) can fire, so surface-mute has something to mute.
     public var hasActiveNotificationChannel: Bool {
       systemNotificationsEnabled || notificationSound != .never
+    }
+
+    /// True once the user picks a language different from the one this process
+    /// launched with, so the settings view can prompt for a relaunch.
+    public var languageNeedsRelaunch: Bool {
+      preferredLanguage != launchLanguage
     }
 
     public init(settings: GlobalSettings = .default) {
@@ -178,6 +190,8 @@ public struct SettingsFeature {
     case setSelection(SettingsSection?)
     case setSystemNotificationsEnabled(Bool)
     case setShowMenuBarIcon(Bool)
+    case setPreferredLanguage(AppLanguage)
+    case relaunchForLanguageChangeTapped
     case setAutomatedActionPolicy(AutomatedActionPolicy)
     case showNotificationPermissionAlert(errorMessage: String?)
     case updateShortcut(id: AppShortcutID, override: AppShortcutOverride?)
@@ -212,6 +226,9 @@ public struct SettingsFeature {
   @CasePathable
   public enum Delegate: Equatable {
     case settingsChanged(GlobalSettings)
+    /// The user asked to relaunch so a language change takes effect. Handled by
+    /// the app reducer, which owns the clean-teardown relaunch.
+    case relaunchRequested
   }
 
   @Dependency(AnalyticsClient.self) private var analyticsClient
@@ -221,6 +238,7 @@ public struct SettingsFeature {
   @Dependency(SystemNotificationClient.self) private var systemNotificationClient
   @Dependency(NotificationSoundClient.self) private var notificationSoundClient
   @Dependency(\.date.now) private var now
+  @Dependency(\.defaultAppStorage) private var defaultAppStorage
 
   public init() {}
 
@@ -230,6 +248,9 @@ public struct SettingsFeature {
       switch action {
       case .task:
         @Shared(.settingsFile) var settingsFile
+        let launchLanguage = AppLanguage.current(defaultAppStorage)
+        state.preferredLanguage = launchLanguage
+        state.launchLanguage = launchLanguage
         return .concatenate(
           .send(.settingsLoaded(settingsFile.global)),
           .merge(
@@ -341,6 +362,16 @@ public struct SettingsFeature {
         state.showMenuBarIcon = isShown
         state.syncGlobalDefaults(from: state.globalSettings)
         return persist(state)
+
+      case .setPreferredLanguage(let language):
+        state.preferredLanguage = language
+        // Persist the choice and mirror it into `AppleLanguages` immediately so a
+        // manual relaunch (not just our button) also picks up the new language.
+        AppLanguage.apply(language, to: defaultAppStorage)
+        return .none
+
+      case .relaunchForLanguageChangeTapped:
+        return .send(.delegate(.relaunchRequested))
 
       case .setAutomatedActionPolicy(let policy):
         state.automatedActionPolicy = policy
