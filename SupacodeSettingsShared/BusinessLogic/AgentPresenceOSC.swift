@@ -222,6 +222,19 @@ public nonisolated enum AgentPresenceOSC {
     "\(kindField)=\(notifyKind);\(titleField)=\(title);\(bodyField)=\(body)"
   }
 
+  /// Emit a notify OSC with a FIXED `title` / `body` (base64-encoded here at
+  /// build time, so no runtime `base64`/`awk`). Used by the Stop hook's
+  /// API-error branch to raise a "needs manual restart" notification through the
+  /// same notify pipeline the menu bar reads. Standard base64 has no `;`/`%`, so
+  /// it is framing- and `printf`-safe with no format args.
+  static func emitFixedNotifyShell(agent: SkillAgent, title: String, body: String) -> String {
+    let encodedTitle = Data(title.utf8).base64EncodedString()
+    let encodedBody = Data(body.utf8).base64EncodedString()
+    let payload =
+      #"\033]3008;start=\#(agent.rawValue);\#(notifyMetadata(title: encodedTitle, body: encodedBody))\033\\"#
+    return #"printf '\#(payload)' > "$__tty""#
+  }
+
   /// Portable awk that extracts one JSON string value from the agent's hook JSON
   /// on stdin. `keys` is a comma-separated precedence list (first non-empty wins);
   /// the raw escaped value is copied verbatim up to the first unescaped `"` and
@@ -258,5 +271,47 @@ public nonisolated enum AgentPresenceOSC {
       + #"__b=$(printf '%s' "$__in" | LC_ALL=C awk -v keys="\#(bodyKeys)" "#
       + #"-v budget=\#(notifyBodyByteBudget) '\#(notifyExtractAwk)' | base64 | tr -d '\n'); "#
       + #"printf '\#(payload)' "$__t" "$__b" > "$__tty""#
+  }
+
+  // MARK: - Stop-hook API-error probe.
+
+  /// Bytes of the transcript tail the Stop-hook probe reads. Bounded so the hook
+  /// stays cheap; a turn's final entries are always at the very end of the file.
+  static let transcriptTailBytes = 65536
+
+  /// Portable `awk` that scans Claude transcript JSONL (one compact JSON object
+  /// per line, oldest-first) and prints `1` iff the current turn ended in an API
+  /// error. Ports clawd-on-desk's `extractApiErrorFromEntries`: the most recent
+  /// `isApiErrorMessage:true` line (for the current `sid`, when known) marks an
+  /// error; a later `type:"user"` (re-prompt) or non-error `type:"assistant"`
+  /// (clean reply) means the turn moved on and the error is stale. Streaming
+  /// single pass: an error line sets the flag, an invalidating line clears it, so
+  /// the END value reflects only the LAST error's tail. Substring matching assumes
+  /// compact JSON (no spaces after `:`); anything else simply fails to match and
+  /// falls back to no-error (idle), never a false positive. A partial first line
+  /// from a truncated tail read is always the oldest entry, before any recent
+  /// error, so it cannot flip the result. No single quote, so it is shell-safe
+  /// inside single-quoted `awk`.
+  static let apiErrorScanAwk =
+    #"{if(index($0,"\"isApiErrorMessage\":true")>0){if(sid==""||index($0,"\"sessionId\":\"" sid "\"")>0)c=1;next}"#
+    + #"if(index($0,"\"type\":\"user\"")>0){c=0;next}"#
+    + #"if(index($0,"\"type\":\"assistant\"")>0){c=0;next}}"#
+    + #"END{printf "%s",(c?"1":"")}"#
+
+  /// Shell for the Claude `Stop` hook that captures the hook JSON on stdin and
+  /// sets `$__apierr=1` when the current turn ended in an API error. Reuses
+  /// `notifyExtractAwk` to pull `transcript_path` / `session_id` from the JSON,
+  /// then scans the transcript tail with `apiErrorScanAwk`. Leaves `$__in` set so
+  /// a following `emitNotifyShell(readsStdin: false)` reuses it (one stdin read).
+  /// SSH-portable: `awk` + `tail` only, no `jq`/`python`.
+  static func stopApiErrorProbeShell() -> String {
+    #"__in=$(cat); "#
+      + #"__tp=$(printf '%s' "$__in" | LC_ALL=C awk -v keys="transcript_path" "#
+      + #"-v budget=4096 '\#(notifyExtractAwk)'); "#
+      + #"__sid=$(printf '%s' "$__in" | LC_ALL=C awk -v keys="session_id" "#
+      + #"-v budget=256 '\#(notifyExtractAwk)'); "#
+      + #"__apierr=""; [ -n "$__tp" ] && [ -f "$__tp" ] && "#
+      + #"__apierr=$(tail -c \#(transcriptTailBytes) "$__tp" 2>/dev/null "#
+      + #"| LC_ALL=C awk -v sid="$__sid" '\#(apiErrorScanAwk)')"#
   }
 }

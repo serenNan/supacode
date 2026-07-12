@@ -9,6 +9,11 @@ nonisolated enum HookEvent: String {
   case busy
   case awaitingInput = "awaiting_input"
   case idle
+  /// Claude turn ended in an API/connection error (detected from the transcript
+  /// `isApiErrorMessage` flag, not terminal text). Sticky app-side until restart.
+  case apiError = "api_error"
+  /// Claude `PreCompact` — context compaction started. Transient app-side.
+  case compacting
 }
 
 nonisolated enum AgentHookSettingsCommand {
@@ -62,6 +67,37 @@ nonisolated enum AgentHookSettingsCommand {
     if forwardStdinAsNotification { steps.append(AgentPresenceOSC.emitNotifyShell(agent: agent)) }
     return "\(oscGuardExpr) && { \(steps.joined(separator: "; ")); } >/dev/null 2>&1 || true \(ownershipMarker)"
   }
+
+  /// Claude `Stop` hook: like a composite `[.idle]` + notify, but first probes
+  /// the transcript for a current-turn API error and emits `.apiError` instead of
+  /// `.idle` when one is found. Detection is structural (transcript
+  /// `isApiErrorMessage`), not terminal-text scraping, and SSH-portable (`awk` +
+  /// `tail`, no `jq`/`python`). Claude Code emits a plain `Stop` on an API error
+  /// (not `StopFailure`), so without this probe an errored turn is
+  /// indistinguishable from a completed one. `$__in` is captured once and reused
+  /// by the trailing notify emit. See `AgentPresenceOSC.stopApiErrorProbeShell`.
+  static func claudeStopCommand(agent: SkillAgent) -> String {
+    // Error branch: presence `api_error` + a fixed "needs restart" notify so the
+    // menu bar / toolbar alert fires through the normal notify pipeline. Idle
+    // branch: presence `idle` + the usual stdin-sourced notify.
+    let errorBranch =
+      "\(AgentPresenceOSC.emitShell(event: .apiError, agent: agent)); "
+      + AgentPresenceOSC.emitFixedNotifyShell(
+        agent: agent, title: Self.apiErrorNotifyTitle, body: Self.apiErrorNotifyBody)
+    let idleBranch =
+      "\(AgentPresenceOSC.emitShell(event: .idle, agent: agent)); "
+      + AgentPresenceOSC.emitNotifyShell(agent: agent, readsStdin: false)
+    let steps: [String] = [
+      AgentPresenceOSC.ttyResolveSnippet,
+      AgentPresenceOSC.stopApiErrorProbeShell(),
+      #"if [ -n "$__apierr" ]; then \#(errorBranch); else \#(idleBranch); fi"#,
+    ]
+    return "\(oscGuardExpr) && { \(steps.joined(separator: "; ")); } >/dev/null 2>&1 || true \(ownershipMarker)"
+  }
+
+  /// Fixed headline / body for the API-error notification the Stop hook raises.
+  static let apiErrorNotifyTitle = "Agent error"
+  static let apiErrorNotifyBody = "Session hit an API error - needs a manual restart"
 
   /// Guard for the OSC command: a surface id present (the no-op-outside-Supacode
   /// gate). Fires both locally and over SSH; the pid suffix inside the presence

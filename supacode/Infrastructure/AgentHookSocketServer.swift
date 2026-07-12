@@ -466,6 +466,11 @@ nonisolated struct AgentHookEvent: Equatable, Sendable, Decodable {
     case awaitingInput = "awaiting_input"
     case idle
     case notification
+    /// Claude turn ended in an API/connection error (transcript `isApiErrorMessage`).
+    /// Sticky: the session needs a manual restart until it goes busy again.
+    case apiError = "api_error"
+    /// Claude context compaction started (`PreCompact`). Transient.
+    case compacting
   }
 
   let version: Int
