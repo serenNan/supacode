@@ -15,10 +15,12 @@ nonisolated struct RepositoryIssueNotification: Equatable, Identifiable, Sendabl
   var isRead = false
 }
 
-/// The per-issue fields compared between consecutive polls.
+/// The per-issue fields compared between consecutive polls of the involved
+/// ("Mine") set.
 nonisolated struct RepositoryIssueSnapshot: Equatable, Sendable {
   let commentsCount: Int
   let labelNames: Set<String>
+  let isClosed: Bool
 }
 
 nonisolated enum RepositoryIssueUpdates {
@@ -26,17 +28,21 @@ nonisolated enum RepositoryIssueUpdates {
     issues.reduce(into: [:]) { result, issue in
       result[issue.number] = RepositoryIssueSnapshot(
         commentsCount: issue.commentsCount,
-        labelNames: Set(issue.labels.map(\.name))
+        labelNames: Set(issue.labels.map(\.name)),
+        isClosed: issue.isClosed
       )
     }
   }
 
-  /// Diffs the fetched issues against the previous poll's snapshot. A `nil`
-  /// previous snapshot is the first successful load and seeds silently.
+  /// Diffs the fetched involved issues against the previous poll's snapshot. A
+  /// `nil` previous snapshot is the first successful load and seeds silently.
+  /// `login` is the signed-in user, used to stay silent about their own newly
+  /// created issues while still announcing issues that newly involve them.
   static func notifications(
     repositoryID: Repository.ID,
     previous: [Int: RepositoryIssueSnapshot]?,
     issues: [GithubIssue],
+    login: String?,
     uuid: () -> UUID,
     now: Date
   ) -> [RepositoryIssueNotification] {
@@ -59,7 +65,11 @@ nonisolated enum RepositoryIssueUpdates {
     }
     for issue in issues {
       guard let before = previous[issue.number] else {
-        append(title: "New issue #\(issue.number)", issue: issue)
+        // Newly in the involved set. Silent for issues the user authored (they
+        // created it); otherwise they were just @mentioned / assigned / replied to.
+        if issue.authorLogin != login {
+          append(title: "You're involved in #\(issue.number)", issue: issue)
+        }
         continue
       }
       if issue.commentsCount > before.commentsCount {
@@ -71,6 +81,9 @@ nonisolated enum RepositoryIssueUpdates {
         let removed = before.labelNames.subtracting(labelNames).sorted().map { "-\($0)" }
         let delta = (added + removed).joined(separator: " ")
         append(title: "Labels changed on #\(issue.number) (\(delta))", issue: issue)
+      }
+      if issue.isClosed != before.isClosed {
+        append(title: "Issue #\(issue.number) \(issue.isClosed ? "closed" : "reopened")", issue: issue)
       }
     }
     return notifications

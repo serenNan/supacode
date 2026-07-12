@@ -458,7 +458,7 @@ extension RepositoriesFeature.Action {
     case .repositoryIssuesLoaded, .issueNotificationSelected, .dismissAllIssueNotifications:
       return .toolbarNotificationGroups
     // In-flight bookkeeping only.
-    case .repositoryIssueRefreshCompleted:
+    case .repositoryIssueRefreshCompleted, .githubLoginResolved:
       return []
 
     // Selection changes only refresh the slice.
