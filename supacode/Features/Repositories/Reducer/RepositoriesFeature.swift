@@ -80,6 +80,7 @@ nonisolated struct WorktreeCreationProgressUpdateThrottle {
 enum WorktreeInspectorPane: Hashable, Sendable {
   case git
   case notifications
+  case history
 }
 
 @Reducer
@@ -138,6 +139,9 @@ struct RepositoriesFeature {
     // leave the column empty when dragged back open.
     var inspectorPresented = false
     var inspectorPane: WorktreeInspectorPane = .git
+    /// Commit history for the currently selected worktree; populated only while
+    /// the history pane is visible (see `gitHistoryReducer`).
+    var gitHistory: GitHistoryState?
     var githubIntegrationAvailability: GithubIntegrationAvailability = .unknown
     var pendingPullRequestRefreshByRepositoryID: [Repository.ID: PendingPullRequestRefresh] = [:]
     var inFlightPullRequestRefreshRepositoryIDs: Set<Repository.ID> = []
@@ -145,6 +149,16 @@ struct RepositoriesFeature {
     /// so `pullRequestChanged.branchAtQueryTime` matches the branch the watermark armed.
     var inFlightPullRequestBranchSnapshotsByRepositoryID: [Repository.ID: [Worktree.ID: String]] = [:]
     var queuedPullRequestRefreshByRepositoryID: [Repository.ID: PendingPullRequestRefresh] = [:]
+    /// Issues are repo-scoped (unlike PRs, which map to worktree branches), so
+    /// they live here rather than fanning out to `sidebarItems` leaves. Only
+    /// the inspector pane reads them.
+    var issuesByRepositoryID: [Repository.ID: [GithubIssue]] = [:]
+    /// Previous poll's per-issue fields; diffed on each load to detect new
+    /// comments / label changes. A missing key means "never loaded" and seeds
+    /// silently so app launch doesn't storm the bell.
+    var issueSnapshotsByRepositoryID: [Repository.ID: [Int: RepositoryIssueSnapshot]] = [:]
+    var inFlightIssueRefreshRepositoryIDs: Set<Repository.ID> = []
+    var issueNotifications: IdentifiedArrayOf<RepositoryIssueNotification> = []
     var sidebarSelectedWorktreeIDs: Set<Worktree.ID> = []
     var nextPendingSidebarRevealID = 0
     var pendingSidebarReveal: PendingSidebarReveal?
@@ -439,6 +453,10 @@ struct RepositoriesFeature {
       repositoryID: Repository.ID,
       pullRequestsByWorktreeID: [Worktree.ID: GithubPullRequest?]
     )
+    case repositoryIssuesLoaded(repositoryID: Repository.ID, issues: [GithubIssue])
+    case repositoryIssueRefreshCompleted(Repository.ID)
+    case issueNotificationSelected(RepositoryIssueNotification.ID)
+    case dismissAllIssueNotifications
     case setGithubIntegrationEnabled(Bool)
     case setMergedWorktreeAction(MergedWorktreeAction?)
     case setAutoDeleteArchivedWorktreesAfterDays(AutoDeletePeriod?)
@@ -449,6 +467,11 @@ struct RepositoriesFeature {
     case dismissToast
     case toggleInspectorPane(WorktreeInspectorPane)
     case setInspectorPresented(Bool)
+    /// A terminal link click resolved to a file in the selected worktree
+    /// (path is worktree-relative). Opens the History pane and presents the
+    /// file's uncommitted diff, scrolled to `line` when present.
+    case openTerminalFileReference(worktreeID: Worktree.ID, path: String, line: Int?)
+    case gitHistory(GitHistoryAction)
     case delayedPullRequestRefresh(Worktree.ID)
     case openRepositorySettings(Repository.ID)
     case requestCustomizeRepository(Repository.ID)
@@ -2210,6 +2233,40 @@ struct RepositoriesFeature {
         }
         return .merge(effects)
 
+      case .repositoryIssuesLoaded(let repositoryID, let issues):
+        guard state.repositories[id: repositoryID] != nil else {
+          return .none
+        }
+        let previousSnapshot = state.issueSnapshotsByRepositoryID[repositoryID]
+        state.issuesByRepositoryID[repositoryID] = issues
+        state.issueSnapshotsByRepositoryID[repositoryID] = RepositoryIssueUpdates.snapshot(of: issues)
+        @Shared(.settingsFile) var settingsFile
+        guard previousSnapshot != nil, settingsFile.global.inAppNotificationsEnabled else {
+          return .none
+        }
+        state.issueNotifications.append(
+          contentsOf: RepositoryIssueUpdates.notifications(
+            repositoryID: repositoryID,
+            previous: previousSnapshot,
+            issues: issues,
+            uuid: { uuid() },
+            now: now
+          )
+        )
+        return .none
+
+      case .repositoryIssueRefreshCompleted(let repositoryID):
+        state.inFlightIssueRefreshRepositoryIDs.remove(repositoryID)
+        return .none
+
+      case .issueNotificationSelected(let notificationID):
+        state.issueNotifications[id: notificationID]?.isRead = true
+        return .none
+
+      case .dismissAllIssueNotifications:
+        state.issueNotifications.removeAll()
+        return .none
+
       case .pullRequestAction(let worktreeID, let action):
         guard let worktree = state.worktree(for: worktreeID),
           let repositoryID = state.repositoryID(containing: worktreeID),
@@ -2761,6 +2818,17 @@ struct RepositoriesFeature {
         state.inspectorPresented = presented
         return .none
 
+      case .openTerminalFileReference(let worktreeID, let path, let line):
+        // Clicks come from the selected worktree's visible terminal; anything
+        // else is stale and dropped rather than replaying selection side effects.
+        guard worktreeID == state.selectedWorktreeID else { return .none }
+        state.inspectorPane = .history
+        state.inspectorPresented = true
+        // The gitHistory reducer's default-arm reconciliation runs after this
+        // switch and seeds `gitHistory` for the now-visible pane, so the
+        // follow-up fileTapped lands on initialized state.
+        return .send(.gitHistory(.fileTapped(source: .uncommitted, path: path, line: line)))
+
       case .delayedPullRequestRefresh(let worktreeID):
         guard let worktree = state.worktree(for: worktreeID),
           let repositoryID = state.repositoryID(containing: worktreeID),
@@ -2925,6 +2993,24 @@ struct RepositoriesFeature {
           case .disabled:
             return .none
           }
+        case .repositoryIssueRefresh(let repositoryRootURL):
+          guard
+            let repository = state.repositories.first(where: { $0.rootURL == repositoryRootURL }),
+            // Issue refresh runs `gh` against the local repo; a remote-only
+            // repo has no local checkout to serve it (same guard as PRs).
+            repository.host == nil,
+            state.githubIntegrationAvailability == .available,
+            !state.inFlightIssueRefreshRepositoryIDs.contains(repository.id)
+          else {
+            // Unlike PRs there is no pending queue: the shared poll cadence
+            // re-emits within one interval once availability resolves.
+            return .none
+          }
+          state.inFlightIssueRefreshRepositoryIDs.insert(repository.id)
+          return refreshRepositoryIssues(
+            repositoryID: repository.id,
+            repositoryRootURL: repositoryRootURL
+          )
         }
       default:
         return .none
@@ -3888,16 +3974,23 @@ struct RepositoriesFeature {
         return .none
 
       case .pinWorktree, .unpinWorktree, .presentAlert, .showToast, .dismissToast, .delayedPullRequestRefresh,
-        .toggleInspectorPane, .setInspectorPresented,
+        .toggleInspectorPane, .setInspectorPresented, .openTerminalFileReference,
         .worktreeNotificationReceived, .worktreeInfoEvent:
         // Real handling lives in `worktreeNotificationReducer` (combined below) to keep `body`
+        // under the type-checker's complexity limit.
+        return .none
+
+      case .gitHistory:
+        // Real handling lives in `gitHistoryReducer` (combined below) to keep `body`
         // under the type-checker's complexity limit.
         return .none
 
       case .refreshGithubIntegrationAvailability, .githubIntegrationAvailabilityUpdated,
         .repositoryPullRequestRefreshCompleted, .worktreeBranchNameLoaded, .worktreeLineChangesLoaded,
         .repositoryPullRequestsLoaded, .pullRequestAction, .setGithubIntegrationEnabled, .setMergedWorktreeAction,
-        .setAutoDeleteArchivedWorktreesAfterDays, .autoDeleteExpiredArchivedWorktrees, .setMoveNotifiedWorktreeToTop:
+        .setAutoDeleteArchivedWorktreesAfterDays, .autoDeleteExpiredArchivedWorktrees, .setMoveNotifiedWorktreeToTop,
+        .repositoryIssuesLoaded, .repositoryIssueRefreshCompleted,
+        .issueNotificationSelected, .dismissAllIssueNotifications:
         // Real handling lives in `githubIntegrationReducer` (combined below) to keep `body`
         // under the type-checker's complexity limit.
         return .none
@@ -4077,6 +4170,9 @@ struct RepositoriesFeature {
     worktreeCreateInRepoReducer
     worktreeNotificationReducer
     githubIntegrationReducer
+    // After the inspector / selection mutations above so its reconciliation
+    // arm observes post-reduce visibility state.
+    gitHistoryReducer
     // Targeted post-reduce hook: only the actions that demonstrably touch
     // structure inputs trigger a recompute. The Equatable diff inside the
     // helper suppresses no-op rebuilds at the SwiftUI layer. Gated on
@@ -4132,6 +4228,33 @@ struct RepositoriesFeature {
         return
       }
       await send(.repositoryPullRequestRefreshCompleted(repositoryID))
+    }
+  }
+
+  private func refreshRepositoryIssues(
+    repositoryID: Repository.ID,
+    repositoryRootURL: URL
+  ) -> Effect<Action> {
+    let gitClient = gitClient
+    let githubCLI = githubCLI
+    return .run { send in
+      if let remoteInfo = await resolveRemoteInfo(
+        repositoryRootURL: repositoryRootURL,
+        githubCLI: githubCLI,
+        gitClient: gitClient
+      ) {
+        do {
+          let issues = try await githubCLI.listIssues(
+            remoteInfo.host,
+            remoteInfo.owner,
+            remoteInfo.repo
+          )
+          await send(.repositoryIssuesLoaded(repositoryID: repositoryID, issues: issues))
+        } catch {
+          // Transient fetch failures self-heal on the next poll tick.
+        }
+      }
+      await send(.repositoryIssueRefreshCompleted(repositoryID))
     }
   }
 
@@ -4553,6 +4676,11 @@ struct RepositoriesFeature {
     let availableWorktreeIDs = Set(repositories.flatMap { $0.worktrees.map(\.id) })
     let (filteredRemovingRepositoryIDs, filteredActiveRemovalBatches) =
       prunedRemovalTrackers(state: state, availableRepoIDs: repositoryIDs)
+    state.issuesByRepositoryID = state.issuesByRepositoryID.filter { repositoryIDs.contains($0.key) }
+    state.issueSnapshotsByRepositoryID = state.issueSnapshotsByRepositoryID.filter {
+      repositoryIDs.contains($0.key)
+    }
+    state.issueNotifications.removeAll { !repositoryIDs.contains($0.repositoryID) }
     let identifiedRepositories = IdentifiedArray(uniqueElements: repositories)
     if animated {
       withAnimation {

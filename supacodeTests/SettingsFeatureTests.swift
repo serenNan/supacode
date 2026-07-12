@@ -130,6 +130,43 @@ struct SettingsFeatureTests {
     #expect(settingsFile.global.systemNotificationsEnabled == true)
   }
 
+  @Test(.dependencies) func togglingShowMenuBarIconPersistsChanges() async {
+    var initialSettings = GlobalSettings.default
+    initialSettings.showMenuBarIcon = true
+    @Shared(.settingsFile) var settingsFile
+    $settingsFile.withLock { $0.global = initialSettings }
+
+    let store = TestStore(initialState: SettingsFeature.State(settings: initialSettings)) {
+      SettingsFeature()
+    }
+
+    await store.send(.binding(.set(\.showMenuBarIcon, false))) {
+      $0.showMenuBarIcon = false
+    }
+    await store.receive(\.delegate.settingsChanged)
+    #expect(settingsFile.global.showMenuBarIcon == false)
+  }
+
+  @Test(.dependencies) func setShowMenuBarIconPersistsOnlyRealFlips() async {
+    var initialSettings = GlobalSettings.default
+    initialSettings.showMenuBarIcon = true
+    @Shared(.settingsFile) var settingsFile
+    $settingsFile.withLock { $0.global = initialSettings }
+
+    let store = TestStore(initialState: SettingsFeature.State(settings: initialSettings)) {
+      SettingsFeature()
+    }
+
+    // Echo of the current value (MenuBarExtra scene evaluation) is a no-op.
+    await store.send(.setShowMenuBarIcon(true))
+
+    await store.send(.setShowMenuBarIcon(false)) {
+      $0.showMenuBarIcon = false
+    }
+    await store.receive(\.delegate.settingsChanged)
+    #expect(settingsFile.global.showMenuBarIcon == false)
+  }
+
   @Test(.dependencies) func selectingNotificationSoundPlaysPreview() async {
     @Shared(.settingsFile) var settingsFile
     $settingsFile.withLock { $0.global = .default }

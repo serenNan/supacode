@@ -365,11 +365,15 @@ extension SidebarItemFeature.Action {
       return .all
     case .pullRequestChanged:
       return .selectedWorktreeSlice
-    // Tabs live only on the leaf (title / sub-rows render off the scoped
-    // store), so title storms never touch the structure caches.
+    // Tab titles feed the notification rows' session headlines; the recompute
+    // Equatable-diffs against `tabTitles` (referenced tabs only), so title
+    // storms on notification-less rows never invalidate SwiftUI. The sidebar
+    // structure stays untouched (title / sub-rows render off the scoped store).
+    case .tabsSnapshotChanged:
+      return .toolbarNotificationGroups
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
-      .tabsSnapshotChanged, .tabAgentsChanged, .tabListExpansionToggled,
+      .tabAgentsChanged, .tabListExpansionToggled,
       .focusTerminalRequested, .focusTerminalConsumed:
       return []
     }
@@ -423,6 +427,11 @@ extension RepositoriesFeature.Action {
     case .cliWorktreeAckCancelled:
       return []
 
+    // Mutates only `state.gitHistory`, which the inspector pane reads directly;
+    // no sidebar cache consumes it.
+    case .gitHistory:
+      return []
+
     // `worktreeBranchNameLoaded` mutates `worktree.name` via `updateWorktreeName`,
     // which feeds `computeToolbarNotificationGroups()` (notification group title).
     // Without `.toolbarNotificationGroups` the popover would show the old name
@@ -438,6 +447,14 @@ extension RepositoriesFeature.Action {
       .pinWorktree, .unpinWorktree,
       .repositoryPullRequestsLoaded:
       return [.sidebarStructure, .selectedWorktreeSlice]
+
+    // Issue loads append repo-level notifications rendered by the toolbar
+    // bell; the sidebar rows never show issue data, so structure/slice stay.
+    case .repositoryIssuesLoaded, .issueNotificationSelected, .dismissAllIssueNotifications:
+      return .toolbarNotificationGroups
+    // In-flight bookkeeping only.
+    case .repositoryIssueRefreshCompleted:
+      return []
 
     // Selection changes only refresh the slice.
     case .selectionChanged, .selectWorktree, .selectArchivedWorktrees,
@@ -505,6 +522,8 @@ extension RepositoriesFeature.Action {
       .sidebarTabRowSelected,
       .showToast, .dismissToast,
       .toggleInspectorPane, .setInspectorPresented,
+      // Inspector + gitHistory orchestration only; sidebar caches untouched.
+      .openTerminalFileReference,
       .delayedPullRequestRefresh,
       .openRepositorySettings, .requestCustomizeRepository,
       .requestCustomizeWorktree,

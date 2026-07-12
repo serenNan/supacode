@@ -23,6 +23,12 @@ enum GitOperation: String {
   case branchDelete = "branch_delete"
   case branchRename = "branch_rename"
   case lineChanges = "line_changes"
+  case commitLog = "commit_log"
+  case commitDetail = "commit_detail"
+  case fileDiff = "file_diff"
+  case upstreamRef = "upstream_ref"
+  case aheadCount = "ahead_count"
+  case workTreeProbe = "work_tree_probe"
   case remoteInfo = "remote_info"
   case remoteList = "remote_list"
   case fetchOrigin = "fetch_origin"
@@ -911,6 +917,114 @@ struct GitClient {
     } catch {
       return nil
     }
+  }
+
+  /// First-parent commit list for the worktree's current branch, decorated with
+  /// full ref names, plus the upstream ahead-count locating the "outgoing" group.
+  nonisolated func commitHistory(at worktreeURL: URL, limit: Int) async throws -> GitHistorySnapshot {
+    let path = worktreeURL.path(percentEncoded: false)
+    let logOutput: String
+    do {
+      logOutput = try await runGit(
+        operation: .commitLog,
+        arguments: [
+          "-C", path, "log", "--first-parent", "--decorate=full",
+          "-n", "\(limit)", "--format=\(Self.commitLogFormat)",
+        ]
+      )
+    } catch {
+      // An unborn branch (fresh repo, no commits yet) fails `git log` but is
+      // still a work tree: report empty history, not an error.
+      let isWorkTree =
+        (try? await runGit(
+          operation: .workTreeProbe,
+          arguments: ["-C", path, "rev-parse", "--is-inside-work-tree"]
+        )) != nil
+      let hasHead =
+        (try? await runGit(
+          operation: .localHeadRef,
+          arguments: ["-C", path, "rev-parse", "--verify", "HEAD"]
+        )) != nil
+      if isWorkTree, !hasHead {
+        return GitHistorySnapshot(commits: [], upstreamRef: nil, aheadCount: 0, isTruncated: false)
+      }
+      throw error
+    }
+    let commits = Self.parseCommitLog(logOutput)
+    var upstreamRef: String?
+    var aheadCount = 0
+    if let upstreamOutput = try? await runGit(
+      operation: .upstreamRef,
+      arguments: ["-C", path, "rev-parse", "--abbrev-ref", "@{upstream}"]
+    ) {
+      let trimmed = upstreamOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        upstreamRef = trimmed
+        if let countOutput = try? await runGit(
+          operation: .aheadCount,
+          arguments: ["-C", path, "rev-list", "--count", "@{upstream}..HEAD"]
+        ) {
+          aheadCount = Int(countOutput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        }
+      }
+    }
+    return GitHistorySnapshot(
+      commits: commits,
+      upstreamRef: upstreamRef,
+      aheadCount: aheadCount,
+      isTruncated: commits.count >= limit
+    )
+  }
+
+  /// Full message plus per-file numstat for one commit. A merge commit yields an
+  /// empty file list (plain `git show` prints no combined diff numstat).
+  nonisolated func commitDetail(at worktreeURL: URL, hash: String) async throws -> GitCommitDetail {
+    let path = worktreeURL.path(percentEncoded: false)
+    let output = try await runGit(
+      operation: .commitDetail,
+      arguments: ["-C", path, "show", hash, "--numstat", "--format=\(Self.commitDetailFormat)"]
+    )
+    guard let detail = Self.parseCommitDetail(output) else {
+      throw GitClientError.commandFailed(command: "git show \(hash)", message: "Unparseable output")
+    }
+    return detail
+  }
+
+  /// Per-file numstat of the working tree's uncommitted changes (vs HEAD).
+  /// Untracked files are not included, matching the sidebar's +/- counts.
+  nonisolated func uncommittedChanges(at worktreeURL: URL) async throws -> [GitCommitFileChange] {
+    let path = worktreeURL.path(percentEncoded: false)
+    let output = try await runGit(
+      operation: .lineChanges,
+      arguments: ["-C", path, "diff", "HEAD", "--numstat"]
+    )
+    return Self.parseNumstat(output)
+  }
+
+  /// Unified diff of one uncommitted file vs HEAD. Untracked files yield an
+  /// empty diff, matching the numstat-based file list.
+  nonisolated func uncommittedFileDiff(at worktreeURL: URL, path filePath: String) async throws
+    -> GitFileDiff
+  {
+    let path = worktreeURL.path(percentEncoded: false)
+    let output = try await runGit(
+      operation: .fileDiff,
+      arguments: ["-C", path, "diff", "HEAD", "--", filePath]
+    )
+    return Self.parseFileDiff(output)
+  }
+
+  /// Unified diff of one file in one commit. Empty `--format=` drops the commit
+  /// header so root commits (no parent to diff against) work like any other.
+  nonisolated func commitFileDiff(at worktreeURL: URL, hash: String, path filePath: String)
+    async throws -> GitFileDiff
+  {
+    let path = worktreeURL.path(percentEncoded: false)
+    let output = try await runGit(
+      operation: .fileDiff,
+      arguments: ["-C", path, "show", "--format=", "--patch", hash, "--", filePath]
+    )
+    return Self.parseFileDiff(output)
   }
 
   nonisolated private func isWorktreeIndexLocked(_ worktreeURL: URL) async -> Bool {

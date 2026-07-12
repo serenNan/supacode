@@ -9,6 +9,7 @@ struct WorktreeStatusInspectorContainer: View {
   let isFolder: Bool
   let isCheckingPullRequest: Bool
   let pullRequest: GithubPullRequest?
+  let repositoryID: Repository.ID?
   let repositoriesStore: StoreOf<RepositoriesFeature>
   let terminalManager: WorktreeTerminalManager
   let onSelectNotification: (Worktree.ID, WorktreeTerminalNotification) -> Void
@@ -22,6 +23,8 @@ struct WorktreeStatusInspectorContainer: View {
           pullRequest: pullRequest,
           isFolder: isFolder,
           isCheckingPullRequest: isCheckingPullRequest,
+          repositoryID: repositoryID,
+          repositoriesStore: repositoriesStore,
           onPullRequestAction: onPullRequestAction
         )
       case .notifications:
@@ -29,6 +32,11 @@ struct WorktreeStatusInspectorContainer: View {
           repositoriesStore: repositoriesStore,
           terminalManager: terminalManager,
           onSelectNotification: onSelectNotification
+        )
+      case .history:
+        WorktreeGitHistoryInspectorView(
+          repositoriesStore: repositoriesStore,
+          isFolder: isFolder
         )
       }
     }
@@ -60,12 +68,22 @@ extension View {
 // MARK: - Git / Pull request pane
 
 /// Inspector pane mirroring the pull-request popover, re-laid out as a grouped
-/// `Form` so it reads cleanly in a narrow inspector column.
+/// `Form` so it reads cleanly in a narrow inspector column. A section picker
+/// switches between the selected worktree's pull request and the repository's
+/// open issues.
 struct WorktreeGitInspectorView: View {
+  enum Section: Hashable {
+    case pullRequest
+    case issues
+  }
+
   let pullRequest: GithubPullRequest?
   let isFolder: Bool
   let isCheckingPullRequest: Bool
+  let repositoryID: Repository.ID?
+  let repositoriesStore: StoreOf<RepositoriesFeature>
   let onPullRequestAction: (RepositoriesFeature.PullRequestAction) -> Void
+  @State private var section: Section = .pullRequest
 
   var body: some View {
     if isFolder {
@@ -75,7 +93,33 @@ struct WorktreeGitInspectorView: View {
         description: Text("This folder isn't a git repository.")
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else if let pullRequest {
+    } else {
+      VStack(spacing: 0) {
+        Picker("Section", selection: $section) {
+          Text("Pull Request").tag(Section.pullRequest)
+          Text("Issues").tag(Section.issues)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal)
+        .padding(.top, 10)
+        .help("Switch between the worktree's pull request and the repository's open issues.")
+        switch section {
+        case .pullRequest:
+          pullRequestSection
+        case .issues:
+          RepositoryIssuesInspectorView(
+            repositoryID: repositoryID,
+            repositoriesStore: repositoriesStore
+          )
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var pullRequestSection: some View {
+    if let pullRequest {
       GitInspectorContent(pullRequest: pullRequest, onPullRequestAction: onPullRequestAction)
     } else if isCheckingPullRequest {
       VStack(spacing: 10) {
@@ -413,6 +457,9 @@ struct WorktreeNotificationsInspectorView: View {
     NotificationsInspectorContent(
       groups: groups,
       onSelectNotification: onSelectNotification,
+      onSelectIssueNotification: { notification in
+        repositoriesStore.send(.issueNotificationSelected(notification.id))
+      },
       onDismissAll: {
         for repositoryGroup in groups {
           for worktreeGroup in repositoryGroup.worktrees {
@@ -420,6 +467,7 @@ struct WorktreeNotificationsInspectorView: View {
               .dismissAllNotifications()
           }
         }
+        repositoriesStore.send(.dismissAllIssueNotifications)
       }
     )
   }
@@ -428,7 +476,11 @@ struct WorktreeNotificationsInspectorView: View {
 private struct NotificationsInspectorContent: View {
   let groups: [ToolbarNotificationRepositoryGroup]
   let onSelectNotification: (Worktree.ID, WorktreeTerminalNotification) -> Void
+  let onSelectIssueNotification: (RepositoryIssueNotification) -> Void
   let onDismissAll: () -> Void
+  /// Sessions whose older notifications are shown inline. Transient by design:
+  /// a pane switch or relaunch falls back to collapsed.
+  @State private var expandedClusters: Set<NotificationSessionKey> = []
 
   var body: some View {
     let count = groups.reduce(0) { $0 + $1.notificationCount }
@@ -458,15 +510,53 @@ private struct NotificationsInspectorContent: View {
         TimelineView(.everyMinute) { context in
           Form {
             ForEach(groups) { repository in
+              if !repository.issueNotifications.isEmpty {
+                Section {
+                  ForEach(repository.issueNotifications) { notification in
+                    IssueNotificationRow(
+                      notification: notification,
+                      now: context.date,
+                      onSelect: onSelectIssueNotification
+                    )
+                  }
+                } header: {
+                  NotificationIssuesHeader(repository: repository)
+                }
+              }
               ForEach(repository.worktrees) { worktree in
                 Section {
-                  ForEach(worktree.notifications) { notification in
+                  // One row per session by default: the newest notification,
+                  // with the session's older history behind an expand toggle.
+                  ForEach(worktree.sessionClusters) { cluster in
                     NotificationRow(
-                      notification: notification,
+                      notification: cluster.newest,
                       worktreeID: worktree.id,
+                      sessionTitle: worktree.sessionTitle(for: cluster.newest),
                       now: context.date,
                       onSelect: onSelectNotification
                     )
+                    if cluster.olderCount > 0 {
+                      if expandedClusters.contains(cluster.id) {
+                        ForEach(cluster.notifications.dropFirst()) { notification in
+                          NotificationRow(
+                            notification: notification,
+                            worktreeID: worktree.id,
+                            sessionTitle: worktree.sessionTitle(for: notification),
+                            now: context.date,
+                            onSelect: onSelectNotification
+                          )
+                        }
+                      }
+                      ClusterToggleRow(
+                        olderCount: cluster.olderCount,
+                        hiddenUnreadCount: cluster.hiddenUnreadCount,
+                        isExpanded: expandedClusters.contains(cluster.id)
+                      ) {
+                        if !expandedClusters.insert(cluster.id).inserted {
+                          expandedClusters.remove(cluster.id)
+                        }
+                      }
+                    }
                   }
                 } header: {
                   NotificationWorktreeHeader(repository: repository, worktree: worktree)
@@ -519,17 +609,143 @@ private struct NotificationWorktreeHeader: View {
   }
 }
 
+/// Section header for repo-level GitHub issue updates, mirroring
+/// `NotificationWorktreeHeader`'s repo identity styling.
+private struct NotificationIssuesHeader: View {
+  let repository: ToolbarNotificationRepositoryGroup
+
+  var body: some View {
+    HStack(spacing: 5) {
+      Text(repository.name)
+        .foregroundStyle(repository.color.map { AnyShapeStyle($0.color) } ?? AnyShapeStyle(.secondary))
+        .layoutPriority(1)
+      Text(verbatim: "·")
+        .foregroundStyle(.tertiary)
+      Text("Issues")
+        .foregroundStyle(.secondary)
+    }
+    .font(.subheadline.weight(.medium))
+    .lineLimit(1)
+    .textCase(nil)
+  }
+}
+
+/// A repo-level issue update row. Clicking marks it read and opens the issue
+/// on GitHub (issues have no in-app detail surface to focus).
+private struct IssueNotificationRow: View {
+  let notification: RepositoryIssueNotification
+  let now: Date
+  let onSelect: (RepositoryIssueNotification) -> Void
+  @Environment(\.openURL) private var openURL
+
+  var body: some View {
+    Button {
+      onSelect(notification)
+      if let url = URL(string: notification.url) {
+        openURL(url)
+      }
+    } label: {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "dot.circle")
+          .font(.caption2)
+          .foregroundStyle(notification.isRead ? Color.secondary : Color.green)
+          .frame(width: 22, height: 22)
+          .background(.bar, in: .circle)
+          .accessibilityHidden(true)
+          .padding(.top, 1)
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(notification.title)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(notification.isRead ? Color.secondary : Color.primary)
+              .lineLimit(1)
+            Spacer(minLength: 6)
+            Text(Self.relativeTime(notification.createdAt, now: now))
+              .font(.caption)
+              .foregroundStyle(.tertiary)
+            Circle()
+              .fill(notification.isRead ? AnyShapeStyle(.clear) : AnyShapeStyle(.orange))
+              .frame(width: 6, height: 6)
+              .accessibilityHidden(true)
+          }
+          Text(notification.body)
+            .font(.callout)
+            .foregroundStyle(notification.isRead ? Color.secondary : Color.primary)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+      .contentShape(.rect)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .buttonStyle(.plain)
+    .help("Open issue on GitHub.")
+  }
+
+  private static func relativeTime(_ date: Date, now: Date) -> String {
+    guard now.timeIntervalSince(date) >= 60 else { return "now" }
+    return date.formatted(.relative(presentation: .named, unitsStyle: .narrow))
+  }
+}
+
+/// Expand/collapse control under a session's newest notification. While
+/// collapsed it must keep hidden unread state discoverable, so it carries an
+/// unread dot + count when any hidden notification is unread.
+private struct ClusterToggleRow: View {
+  let olderCount: Int
+  let hiddenUnreadCount: Int
+  let isExpanded: Bool
+  let onToggle: () -> Void
+
+  var body: some View {
+    Button(action: onToggle) {
+      HStack(spacing: 6) {
+        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+          .font(.caption2)
+          .accessibilityHidden(true)
+        Text(isExpanded ? "Hide Older" : "Show \(olderCount) Older")
+        if !isExpanded, hiddenUnreadCount > 0 {
+          Circle()
+            .fill(.orange)
+            .frame(width: 6, height: 6)
+            .accessibilityHidden(true)
+          Text("\(hiddenUnreadCount) unread")
+        }
+        Spacer()
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      // Indent under the row content, past NotificationSourceIcon's column.
+      .padding(.leading, 32)
+      .contentShape(.rect)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .buttonStyle(.plain)
+    .help(
+      isExpanded
+        ? "Hide this session's older notifications."
+        : "Show this session's older notifications."
+    )
+  }
+}
+
 private struct NotificationRow: View {
   let notification: WorktreeTerminalNotification
   let worktreeID: Worktree.ID
+  /// Live title of the notification's tab; when the notification came from an
+  /// agent this replaces the generic agent name so rows are tellable apart
+  /// (and it tracks agent/user renames). Nil when the tab is gone or untitled.
+  let sessionTitle: String?
   let now: Date
   let onSelect: (Worktree.ID, WorktreeTerminalNotification) -> Void
 
   var body: some View {
     // Notification titles are the agent slug ("claude", "codex", …) when the
-    // notification came from an agent; show its mark and display name instead.
+    // notification came from an agent; show its mark, headlined by the
+    // resolved session/agent title.
     let agent = SkillAgent(rawValue: notification.title.lowercased())
-    let title = agent?.displayName ?? (notification.title.isEmpty ? "Terminal" : notification.title)
+    let title = notification.headline(sessionTitle: sessionTitle)
     Button {
       onSelect(worktreeID, notification)
     } label: {
@@ -566,9 +782,7 @@ private struct NotificationRow: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .buttonStyle(.plain)
-    // Body is clamped to three lines; surface the full text on hover, matching
-    // the sidebar bell popover. Fall back to the action hint for body-less rows.
-    .help(notification.body.isEmpty ? "Select worktree and focus terminal." : notification.content)
+    .help("Select worktree and focus terminal.")
   }
 
   private static func markdown(_ string: String) -> AttributedString {

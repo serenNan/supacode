@@ -103,6 +103,7 @@ extension AppFeature.Action {
         return true
       case .notificationReceived, .tabCreated, .tabClosed, .focusChanged,
         .taskStatusChanged, .blockingScriptCompleted, .commandPaletteToggleRequested,
+        .fileReferenceClicked,
         .setupScriptConsumed, .worktreeProjectionChanged, .worktreeTabsChanged,
         .tabProjectionChanged,
         .tabRemoved, .worktreeStateTornDown, .tabProgressDisplayChanged,
@@ -124,7 +125,9 @@ extension AppFeature.Action {
       .worktreeSettingsLoaded, .openSelectedWorktree, .revealInFinder,
       .openWorktree, .openWorktreeFailed, .requestQuit,
       .requestTerminateAllTerminalSessions, .newTerminal,
-      .selectTerminalTabAtIndex, .splitTerminal, .jumpToLatestUnread, .runScript, .runNamedScript,
+      .selectTerminalTabAtIndex, .splitTerminal, .jumpToLatestUnread,
+      .menuBarNotificationSelected, .showNotificationsPane,
+      .markAllNotificationsRead, .clearAllNotifications, .runScript, .runNamedScript,
       .stopScript, .stopRunScripts, .closeTab, .closeSurface,
       .startSearch, .searchSelection, .navigateSearchNext,
       .navigateSearchPrevious, .endSearch,

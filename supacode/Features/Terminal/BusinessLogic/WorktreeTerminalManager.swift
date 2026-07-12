@@ -535,10 +535,7 @@ final class WorktreeTerminalManager {
       // follows; fall back to the theme background here.
       self?.refreshFocusedSurfaceBackground()
     }
-    // OSC-sourced presence events go through the existing idle-debounce funnel.
-    state.onAgentHookEvent = { [weak self] event in
-      self?.dispatchHookEvent(event)
-    }
+    wireAgentEventForwarding(state, worktree: worktree)
     state.onNotificationReceived = { [weak self] surfaceID, title, body, isViewed in
       self?.emit(
         .notificationReceived(
@@ -608,6 +605,16 @@ final class WorktreeTerminalManager {
     states[worktree.id] = state
     terminalLogger.info("Created terminal state for worktree \(worktree.id)")
     return state
+  }
+
+  private func wireAgentEventForwarding(_ state: WorktreeTerminalState, worktree: Worktree) {
+    // OSC-sourced presence events go through the existing idle-debounce funnel.
+    state.onAgentHookEvent = { [weak self] event in
+      self?.dispatchHookEvent(event)
+    }
+    state.onFileReferenceClicked = { [weak self] path, line in
+      self?.emit(.fileReferenceClicked(worktreeID: worktree.id, path: path, line: line))
+    }
   }
 
   private func createTabAsync(
@@ -990,6 +997,21 @@ final class WorktreeTerminalManager {
   func markNotificationRead(worktreeID: Worktree.ID, notificationID: UUID) {
     states[worktreeID]?.markNotificationRead(id: notificationID)
     emitProjection(for: worktreeID)
+  }
+
+  /// Marks every notification in every managed worktree read. Indicator and
+  /// projection updates propagate via each state's notification callbacks.
+  func markAllNotificationsRead() {
+    for state in states.values {
+      state.markAllNotificationsRead()
+    }
+  }
+
+  /// Removes every notification from every managed worktree.
+  func dismissAllNotifications() {
+    for state in states.values {
+      state.dismissAllNotifications()
+    }
   }
 
   /// Embed `agentsBySurface` in each surface so badges survive relaunch.

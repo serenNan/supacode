@@ -496,6 +496,10 @@ final class WorktreeInfoWatcherManager {
       return
     }
     emit(.repositoryPullRequestRefresh(repositoryRootURL: repositoryRootURL, worktreeIDs: worktreeIDs))
+    // Issues are repo-scoped and share the PR cadence, enablement, and
+    // cancellation, so they piggyback on the PR schedule instead of
+    // maintaining a parallel task map.
+    emit(.repositoryIssueRefresh(repositoryRootURL: repositoryRootURL))
   }
 
   private func updateLineChangeSchedule(

@@ -108,6 +108,7 @@ struct WorktreeDetailView: View {
         isFolder: selectedRow?.isFolder == true,
         isCheckingPullRequest: isCheckingPullRequest,
         pullRequest: inspectorPullRequest,
+        repositoryID: selectedWorktree.flatMap { repositories.repositoryID(containing: $0.id) },
         repositoriesStore: repositoriesStore,
         terminalManager: terminalManager,
         onSelectNotification: selectToolbarNotification,
@@ -377,12 +378,7 @@ struct WorktreeDetailView: View {
     var body: some View {
       if let repositoriesStore {
         let groups = repositoriesStore.toolbarNotificationGroupsCache
-        let unreadCount = groups.reduce(0) { count, repository in
-          count
-            + repository.worktrees.reduce(0) { worktreeCount, worktree in
-              worktreeCount + worktree.notifications.filter { !$0.isRead }.count
-            }
-        }
+        let unreadCount = groups.reduce(0) { $0 + $1.unreadCount }
         WorktreeNotificationsToolbarButton(
           unreadCount: unreadCount,
           isSelected: isSelected,
@@ -759,6 +755,12 @@ struct WorktreeDetailView: View {
           tint: chromeTint,
           foreground: chromeForeground,
           onActivate: { onActivateInspector(.notifications) }
+        )
+        WorktreeGitHistoryToolbarButton(
+          isSelected: inspectorPresented && inspectorPane == .history,
+          tint: chromeTint,
+          foreground: chromeForeground,
+          onActivate: { onActivateInspector(.history) }
         )
       }
     }

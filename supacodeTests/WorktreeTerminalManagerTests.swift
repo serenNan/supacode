@@ -654,6 +654,31 @@ struct WorktreeTerminalManagerTests {
     }
   }
 
+  @Test func appendedNotificationRecordsContainingTab() {
+    withDependencies {
+      $0.date.now = Date(timeIntervalSince1970: 1_234)
+      $0.continuousClock = ImmediateClock()
+    } operation: {
+      let manager = WorktreeTerminalManager(runtime: GhosttyRuntime())
+      let worktree = makeWorktree()
+      let state = manager.state(for: worktree)
+
+      guard
+        let tab = state.createTab(),
+        let surface = state.splitTree(for: tab).root?.leftmostLeaf()
+      else {
+        Issue.record("Expected tab and surface")
+        return
+      }
+
+      // The inspector resolves the session headline via this tab id, so the
+      // append path must record which tab the surface lived in.
+      state.appendHookNotification(title: "claude", body: "needs input", surfaceID: surface.id)
+
+      #expect(state.notifications.first?.tabID == tab)
+    }
+  }
+
   @Test func notificationIndicatorUsesCurrentCountOnStreamStart() async {
     let manager = WorktreeTerminalManager(runtime: GhosttyRuntime())
     let worktree = makeWorktree()

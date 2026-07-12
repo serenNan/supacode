@@ -41,6 +41,13 @@ public struct NotificationsSettingsView: View {
           Text("Skip the notification and sound when the terminal that sent it is focused and visible.")
         }
         .disabled(!store.hasActiveNotificationChannel)
+        Toggle(
+          isOn: $store.showMenuBarIcon
+        ) {
+          Text("Show menu bar icon")
+          Text("Keep a bell in the macOS menu bar with unread notifications and quick actions.")
+        }
+        .help("Show the Supacode notification icon in the menu bar")
       }
       Section("Worktrees") {
         Toggle(

@@ -23,8 +23,14 @@ struct PullRequestMergeQueueStatusTests {
 
     #expect(status?.position == 3)
     #expect(status?.positionLabel == "Position 3")
-    #expect(status?.estimatedTimeLabel == "~10 min left")
-    #expect(status?.detail == "Position 3 · ~10 min left")
+    // The minute spelling is locale- and OS-version-sensitive (en_CA on 26.5
+    // pluralizes to "mins" while other locales keep "min"); assert the shape
+    // and the composition, not the spelling.
+    let label = status?.estimatedTimeLabel
+    #expect(label?.hasPrefix("~") == true)
+    #expect(label?.hasSuffix(" left") == true)
+    #expect(label?.contains("10") == true)
+    #expect(status?.detail == "Position 3 · \(label ?? "")")
   }
 
   @Test func dropsEstimatedTimeWhenZeroOrMissing() {

@@ -16,6 +16,10 @@ struct TerminalClient {
   var selectedSurfaceID: @MainActor @Sendable (Worktree.ID) -> UUID?
   var latestUnreadNotification: @MainActor @Sendable () -> NotificationLocation?
   var markNotificationRead: @MainActor @Sendable (Worktree.ID, UUID) -> Void
+  /// Marks every notification in every worktree read (menu bar "Mark All as Read").
+  var markAllNotificationsRead: @MainActor @Sendable () -> Void
+  /// Removes every terminal notification in every worktree (menu bar "Clear All").
+  var dismissAllNotifications: @MainActor @Sendable () -> Void
   /// Blocking scripts (setup / archive / delete / run) bypass zmx and die
   /// with the app, so the auto-mode quit confirmation needs to know.
   var hasInflightBlockingScripts: @MainActor @Sendable () -> Bool
@@ -75,6 +79,10 @@ struct TerminalClient {
     case blockingScriptCompleted(
       worktreeID: Worktree.ID, kind: BlockingScriptKind, exitCode: Int?, tabId: TerminalTabID?)
     case commandPaletteToggleRequested(worktreeID: Worktree.ID)
+    /// A clicked terminal link resolved to a file inside the worktree.
+    /// `path` is worktree-relative; `line` comes from a `path:line` suffix.
+    /// Routed to the History pane to present the file's uncommitted diff.
+    case fileReferenceClicked(worktreeID: Worktree.ID, path: String, line: Int?)
     case setupScriptConsumed(worktreeID: Worktree.ID)
     /// Per-worktree projection emitted when surfaces / task-running / unseen / notifications drift.
     /// Routed by the parent into the matching `SidebarItemFeature` via the row's id.
@@ -128,6 +136,8 @@ extension TerminalClient: DependencyKey {
     selectedSurfaceID: { _ in fatalError("TerminalClient.selectedSurfaceID not configured") },
     latestUnreadNotification: { fatalError("TerminalClient.latestUnreadNotification not configured") },
     markNotificationRead: { _, _ in fatalError("TerminalClient.markNotificationRead not configured") },
+    markAllNotificationsRead: { fatalError("TerminalClient.markAllNotificationsRead not configured") },
+    dismissAllNotifications: { fatalError("TerminalClient.dismissAllNotifications not configured") },
     hasInflightBlockingScripts: { fatalError("TerminalClient.hasInflightBlockingScripts not configured") },
     terminateAllSessions: { fatalError("TerminalClient.terminateAllSessions not configured") },
     reapOrphanSessions: { _ in fatalError("TerminalClient.reapOrphanSessions not configured") },
@@ -145,6 +155,8 @@ extension TerminalClient: DependencyKey {
     selectedSurfaceID: unimplemented("TerminalClient.selectedSurfaceID", placeholder: nil),
     latestUnreadNotification: unimplemented("TerminalClient.latestUnreadNotification", placeholder: nil),
     markNotificationRead: unimplemented("TerminalClient.markNotificationRead"),
+    markAllNotificationsRead: unimplemented("TerminalClient.markAllNotificationsRead"),
+    dismissAllNotifications: unimplemented("TerminalClient.dismissAllNotifications"),
     hasInflightBlockingScripts: unimplemented("TerminalClient.hasInflightBlockingScripts", placeholder: false),
     terminateAllSessions: unimplemented("TerminalClient.terminateAllSessions"),
     reapOrphanSessions: unimplemented("TerminalClient.reapOrphanSessions"),
