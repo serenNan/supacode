@@ -10,7 +10,7 @@
 
 ## 3. Hook-side: transcript API-error scan in the Stop command
 
-- [x] 3.1 Write the pure-`awk` transcript-tail scanner (bounded tail read, drop first line on truncation, find last `"isApiErrorMessage":true`, current-turn gate = no later `"type":"user"` / non-error `"type":"assistant"`). Port from clawd `extractApiErrorFromEntries`
+- [x] 3.1 Write the pure-`awk` transcript-tail scanner (bounded tail read, drop first line on truncation, find last `"isApiErrorMessage":true`, current-turn gate = no later `"type":"user"` / non-error `"type":"assistant"`). Independent reimplementation of the same approach as clawd `extractApiErrorFromEntries` (no code copied)
 - [x] 3.2 Rewrite the Claude `Stop` hook command to: read stdin JSON, awk-extract `transcript_path`, run the scanner, emit `event=api_error` on match else `event=idle`. Keep SSH-portable (no `jq`/`python`); reuse `emitShell` + stdin-awk pattern
 - [x] 3.3 Add `AgentHookCommandTests` cases: Stop command references `transcript_path` + the api-error path and still emits `event=idle` on the no-match branch
 - [x] 3.4 Add a fixture-driven test that runs the awk scanner (via `Process`) against transcript JSONL fixtures — error-current-turn ⇒ api_error, stale-error ⇒ idle, no-error ⇒ idle, missing-file ⇒ idle
