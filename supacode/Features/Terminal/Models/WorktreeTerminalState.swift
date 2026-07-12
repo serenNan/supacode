@@ -865,6 +865,10 @@ final class WorktreeTerminalState {
     if let existing = trees[tabId] {
       return existing
     }
+    // A stale render of a just-closed tab (removal transition) must not lazily
+    // resurrect it: the replacement surface would be invisible, unclosable, and
+    // hold its local and host zmx sessions alive.
+    guard hasTab(tabId) else { return SplitTree() }
     let surface = createSurface(
       tabId: tabId,
       command: command,
@@ -1684,9 +1688,9 @@ final class WorktreeTerminalState {
       guard self.isLiveSurface(view) else { return }
       self.handleContextSignal(surfaceID: view.id, id: id, metadata: metadata)
     }
-    view.bridge.onCloseRequest = { [weak self, weak view] processAlive in
+    view.bridge.onCloseRequest = { [weak self, weak view] _ in
       guard let self, let view else { return }
-      self.handleCloseRequest(for: view, processAlive: processAlive)
+      self.handleCloseRequest(for: view)
     }
     view.onFocusChange = { [weak self, weak view] focused in
       guard let self, let view, focused else { return }
@@ -2179,11 +2183,8 @@ final class WorktreeTerminalState {
     Task.detached {
       await withTaskGroup(of: Void.self) { group in
         for id in sessionIDs {
-          if killLocal {
-            group.addTask { await client.killSession(id) }
-          }
-          if let host {
-            group.addTask { await client.killRemoteSession(host, id) }
+          group.addTask {
+            await client.killSurfaceSessions(sessionID: id, remoteHost: host, killLocal: killLocal)
           }
         }
       }
@@ -2458,7 +2459,7 @@ final class WorktreeTerminalState {
     }
   }
 
-  private func handleCloseRequest(for view: GhosttySurfaceView, processAlive _: Bool) {
+  private func handleCloseRequest(for view: GhosttySurfaceView) {
     guard surfaces[view.id] === view else { return }
     let isExplicitClose = pendingExplicitSurfaceCloseIDs.remove(view.id) != nil
     if shouldHandleAsUnexpectedZmxClose(
