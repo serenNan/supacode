@@ -125,6 +125,7 @@ struct SupacodeApp: App {
   @State private var ghosttyShortcuts: GhosttyShortcutManager
   @State private var terminalManager: WorktreeTerminalManager
   @State private var worktreeInfoWatcher: WorktreeInfoWatcherManager
+  @State private var todoFileWatcher: TodoFileWatcherManager
   @State private var commandKeyObserver: CommandKeyObserver
   @State private var store: StoreOf<AppFeature>
 
@@ -181,12 +182,15 @@ struct SupacodeApp: App {
     _terminalManager = State(initialValue: terminalManager)
     let worktreeInfoWatcher = WorktreeInfoWatcherManager()
     _worktreeInfoWatcher = State(initialValue: worktreeInfoWatcher)
+    let todoFileWatcher = TodoFileWatcherManager()
+    _todoFileWatcher = State(initialValue: todoFileWatcher)
     let keyObserver = CommandKeyObserver()
     _commandKeyObserver = State(initialValue: keyObserver)
     let appStore = Self.makeStore(
       initialSettings: initialSettings,
       terminalManager: terminalManager,
-      worktreeInfoWatcher: worktreeInfoWatcher
+      worktreeInfoWatcher: worktreeInfoWatcher,
+      todoFileWatcher: todoFileWatcher
     )
     _store = State(initialValue: appStore)
     appDelegate.appStore = appStore
@@ -226,7 +230,8 @@ struct SupacodeApp: App {
   private static func makeStore(
     initialSettings: GlobalSettings,
     terminalManager: WorktreeTerminalManager,
-    worktreeInfoWatcher: WorktreeInfoWatcherManager
+    worktreeInfoWatcher: WorktreeInfoWatcherManager,
+    todoFileWatcher: TodoFileWatcherManager
   ) -> StoreOf<AppFeature> {
     Store(initialState: AppFeature.State(settings: SettingsFeature.State(settings: initialSettings))) {
       AppFeature()
@@ -259,6 +264,9 @@ struct SupacodeApp: App {
             let tabID = state.tabManager.selectedTabId
           else { return nil }
           return state.activeSurfaceID(for: tabID)
+        },
+        insertTextInFocusedSurface: { worktree, text in
+          terminalManager.stateIfExists(for: worktree.id)?.focusAndInsertText(text) ?? false
         },
         latestUnreadNotification: {
           terminalManager.latestUnreadNotificationLocation()
@@ -293,6 +301,7 @@ struct SupacodeApp: App {
           worktreeInfoWatcher.eventStream()
         }
       )
+      values.todoFile = .live(manager: todoFileWatcher)
       // Bridge the archived-worktree timestamps from the canonical
       // `@Shared(.sidebar)` bucket into the `SupacodeSettingsShared`
       // package, which cannot see `SidebarState` directly. The
@@ -524,6 +533,7 @@ struct SupacodeApp: App {
         }
         .appKeyboardShortcut(AppShortcuts.showMainWindow.effective(from: store.settings.shortcutOverrides))
         .help("Show Main Window")
+        TodoPanelMenuButton()
       }
       CommandGroup(replacing: .appSettings) {
         SettingsMenuButton(shortcutOverrides: store.settings.shortcutOverrides) {
@@ -570,6 +580,13 @@ struct SupacodeApp: App {
     .handlesExternalEvents(matching: [])
     .windowToolbarStyle(.unified)
     .defaultSize(width: 720, height: 640)
+    .restorationBehavior(.disabled)
+    Window("Todos", id: WindowID.todoPanel) {
+      TodoPanelView(store: store.scope(state: \.todoPanel, action: \.todoPanel))
+    }
+    .handlesExternalEvents(matching: [])
+    .windowToolbarStyle(.unified)
+    .defaultSize(width: 380, height: 520)
     .restorationBehavior(.disabled)
     MenuBarExtra(isInserted: showMenuBarIcon) {
       MenuBarNotificationsMenu(store: store)

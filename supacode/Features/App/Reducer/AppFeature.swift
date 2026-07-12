@@ -71,6 +71,7 @@ struct AppFeature {
     var settings: SettingsFeature.State
     var updates = UpdatesFeature.State()
     var commandPalette = CommandPaletteFeature.State()
+    var todoPanel = TodoPanelFeature.State()
     /// Terminal-orchestration state. Owns the per-tab feature collection so
     /// tab-bar views scope through `\.terminals` (narrow) instead of the full
     /// app store. Mirrors sidebar's `RepositoriesFeature` ownership pattern.
@@ -196,6 +197,7 @@ struct AppFeature {
     case settings(SettingsFeature.Action)
     case updates(UpdatesFeature.Action)
     case commandPalette(CommandPaletteFeature.Action)
+    case todoPanel(TodoPanelFeature.Action)
     case openActionSelectionChanged(OpenWorktreeAction)
     case worktreeSettingsLoaded(RepositorySettings, worktreeID: Worktree.ID)
     case openSelectedWorktree
@@ -377,7 +379,8 @@ struct AppFeature {
             },
             .run { _ in
               await worktreeInfoWatcher.send(.setSelectedWorktreeID(nil))
-            }
+            },
+            .send(.todoPanel(.selectionChanged(nil)))
           )
         }
         let rootURL = worktree.repositoryRootURL
@@ -387,6 +390,11 @@ struct AppFeature {
         }
         @Shared(.repositorySettings(rootURL, host: worktree.host)) var repositorySettings
         let settings = repositorySettings
+        let todoSelection = TodoPanelFeature.Selection(
+          worktree: worktree,
+          repositoryName: state.repositories.repositories
+            .first { $0.worktrees[id: worktree.id] != nil }?.name
+        )
         return .merge(
           .run { _ in
             await terminalClient.send(.setSelectedWorktreeID(worktree.id))
@@ -394,7 +402,8 @@ struct AppFeature {
           .run { _ in
             await worktreeInfoWatcher.send(.setSelectedWorktreeID(worktree.id))
           },
-          .send(.worktreeSettingsLoaded(settings, worktreeID: worktreeID))
+          .send(.worktreeSettingsLoaded(settings, worktreeID: worktreeID)),
+          .send(.todoPanel(.selectionChanged(todoSelection)))
         )
 
       case .repositories(.delegate(.worktreeCreated(let worktree))):
@@ -1292,6 +1301,22 @@ struct AppFeature {
       case .commandPalette:
         return .none
 
+      case .todoPanel(.delegate(.sendToActiveSession(let text))):
+        guard
+          let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID)
+        else {
+          return .send(.todoPanel(.sendToSessionFailed))
+        }
+        return .run { send in
+          let inserted = await terminalClient.insertTextInFocusedSurface(worktree, text)
+          if !inserted {
+            await send(.todoPanel(.sendToSessionFailed))
+          }
+        }
+
+      case .todoPanel:
+        return .none
+
       case .terminalEvent(
         .notificationReceived(let worktreeID, let surfaceID, let title, let body, let isViewed)):
         var effects: [Effect<Action>] = [
@@ -1504,6 +1529,9 @@ struct AppFeature {
     }
     Scope(state: \.updates, action: \.updates) {
       UpdatesFeature()
+    }
+    Scope(state: \.todoPanel, action: \.todoPanel) {
+      TodoPanelFeature()
     }
     Scope(state: \.commandPalette, action: \.commandPalette) {
       CommandPaletteFeature()

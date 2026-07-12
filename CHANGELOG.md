@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-07-12 内置待办面板（todo panel）
+- 新增独立 Todos 窗口（Window 菜单 / ⌥⌘T）+ 侧边栏左下角常驻 Todos 按钮：显示当前会话项目 TODO.md 的未完成项，按标题分组；两个入口共用一套 reducer
+- 侧边栏按钮点击后在按钮上方就地展开一个规整圆角矩形面板（非 popover、无箭头指示），激活时按钮主题色高亮；面板纯显示待办内容
+- 勾选圆圈把 `- [ ]` 改成 `- [x]`（字节级保真+冲突保护），点任务文字把文本注入当前会话终端输入框（不回车）
+- 文件解析顺序：当前 worktree 根目录 TODO.md 优先，缺失回退仓库主 checkout；kqueue watcher 200ms 去抖自动刷新；独立窗口与展开面板按呈现引用计数，最后一个关闭才拆 watcher
+- OpenSpec change `add-todo-panel`；上游 PR 候选，cherry-pick 时剔除本文件与 openspec/
+
 ## 2026-07-12 菜单栏通知项（仿 cmux）
 - 新增 macOS 菜单栏铃铛（`MenuBarExtra` `.menu` 样式），存在未读通知时图标变 `bell.badge`；下拉列出最近 ≤10 条未读（terminal 通知显示会话名/摘要/相对时间，issue 通知显示标题/仓库名），点击条目激活 app、选中 worktree、聚焦对应 surface 并标已读（issue 条目开 GitHub 并标已读）
 - 菜单快捷操作：显示通知面板（激活主窗并开 inspector Notifications 页，已打开时不反向 toggle）/ 跳转到最新未读（复用 ⇧⌘U 逻辑）/ 全部标记为已读 / 全部清除（terminal + issue 一起清）；底部：检查更新 / 设置 / 退出
@@ -43,7 +50,6 @@
 - issue 轮询搭 PR 刷新顺风车（同 30/60s 节奏、同 githubIntegrationEnabled 开关，无新任务表）；快照 diff 检测新 issue / 新评论 / 标签变化，推 repo 级通知到工具栏铃铛（首载静默），点通知开 issue 页并标已读
 - 新增 GithubIssue 模型 + GithubCLIClient.listIssues（gh api graphql）、RepositoryIssueUpdates 纯 diff 逻辑、RepositoryIssuesInspectorView；OpenSpec 工件在 openspec/changes/add-issue-tracking/（验证后可 archive）
 - 全量测试 2409 用例通过；此功能为 fork 自用，暂不走上游贡献流程
-
 ## 2026-07-11 通知面板紧凑化
 - 通知 inspector 的正文截断为 3 行（WorktreeStatusInspector.swift NotificationRow 加 lineLimit(3)），悬停 tooltip 显示完整内容，点击跳转 pane 行为不变
 - 此改动是上游 PR 候选，提 PR 时从 upstream/main 切分支 cherry-pick 此提交

@@ -14,6 +14,9 @@ struct TerminalClient {
   /// synchronously before an async dispatch races against AppKit focus reshuffle
   /// (e.g. when a palette dismisses and the leftmost pane reclaims first responder).
   var selectedSurfaceID: @MainActor @Sendable (Worktree.ID) -> UUID?
+  /// Insert text into the worktree's focused surface without submitting it.
+  /// Returns false when the worktree has no focused surface to receive it.
+  var insertTextInFocusedSurface: @MainActor @Sendable (Worktree, String) -> Bool
   var latestUnreadNotification: @MainActor @Sendable () -> NotificationLocation?
   var markNotificationRead: @MainActor @Sendable (Worktree.ID, UUID) -> Void
   /// Marks every notification in every worktree read (menu bar "Mark All as Read").
@@ -134,6 +137,9 @@ extension TerminalClient: DependencyKey {
     tabID: { _, _ in fatalError("TerminalClient.tabID not configured") },
     selectedTabID: { _ in fatalError("TerminalClient.selectedTabID not configured") },
     selectedSurfaceID: { _ in fatalError("TerminalClient.selectedSurfaceID not configured") },
+    insertTextInFocusedSurface: { _, _ in
+      fatalError("TerminalClient.insertTextInFocusedSurface not configured")
+    },
     latestUnreadNotification: { fatalError("TerminalClient.latestUnreadNotification not configured") },
     markNotificationRead: { _, _ in fatalError("TerminalClient.markNotificationRead not configured") },
     markAllNotificationsRead: { fatalError("TerminalClient.markAllNotificationsRead not configured") },
@@ -153,6 +159,8 @@ extension TerminalClient: DependencyKey {
     tabID: unimplemented("TerminalClient.tabID", placeholder: nil),
     selectedTabID: unimplemented("TerminalClient.selectedTabID", placeholder: nil),
     selectedSurfaceID: unimplemented("TerminalClient.selectedSurfaceID", placeholder: nil),
+    insertTextInFocusedSurface: unimplemented(
+      "TerminalClient.insertTextInFocusedSurface", placeholder: false),
     latestUnreadNotification: unimplemented("TerminalClient.latestUnreadNotification", placeholder: nil),
     markNotificationRead: unimplemented("TerminalClient.markNotificationRead"),
     markAllNotificationsRead: unimplemented("TerminalClient.markAllNotificationsRead"),
