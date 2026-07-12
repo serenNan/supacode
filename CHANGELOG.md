@@ -5,6 +5,7 @@
 - 折叠时若隐藏的旧通知里有未读，控件上带橙点 + "N unread" 提示，未读永不被折叠吞掉；铃铛计数语义不变
 - 实现：ToolbarNotificationWorktreeGroup 增加 sessionClusters 计算属性（键 tabID，tab 已关时回退 surfaceID 归组），展开状态是 inspector 的临时 @State 不持久化；新增 3 个分组测试
 - OpenSpec change：openspec/changes/collapse-notifications-by-session
+- 去掉通知行 hover 弹出完整通知内容的行为（inspector 行与侧边栏 popover 两处）：折叠展开已能看历史全文，悬浮大段文本反而碍事；tooltip 回归纯动作提示（"Select worktree and focus terminal." / "Focus pane"）
 
 ## 2026-07-11 回合上游三个修复 PR + 测试 locale 修正
 - cherry-pick 上游未合并的 bug 修复 PR（作者 jeremybower）：#639 tuist 重新生成只清本 worktree 的 DerivedData（挪到仓库内 `.build/DerivedData`，根治并行 worktree 构建互删）、#638 coalescesBurstOfProgressReports 改 advance-until-settled 循环去 flaky、#632 merge queue ETA 测试适配 macOS 26.5
