@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-07-12 归档 file-diff-viewer 提案，追踪 TODO 与 file-tree-pane 提案
+- `add-file-diff-viewer` 功能早已合入 main（`b3bca5a1`）但一直没跑 `openspec archive`，补跑后 `file-diff-viewer` capability 正式进入 `openspec/specs/`
+- 清理与已归档版本逐字节重复的 `terminal-file-link-diff-viewer` 残留草稿目录
+- 提交根目录 `TODO.md`（roadmap 四象限清单）与尚未实现的 `add-file-tree-pane` 提案（proposal/design/specs/tasks），此前一直是未跟踪文件
+
 ## 2026-07-12 内置待办面板（todo panel）
 - 新增独立 Todos 窗口（Window 菜单 / ⌥⌘T）+ 侧边栏左下角常驻 Todos 按钮：显示当前会话项目 TODO.md 的未完成项，按标题分组；两个入口共用一套 reducer
 - 侧边栏按钮点击后在按钮上方就地展开一个规整圆角矩形面板（非 popover、无箭头指示），激活时按钮主题色高亮；面板纯显示待办内容
