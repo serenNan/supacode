@@ -70,7 +70,7 @@ struct SidebarActiveClassificationTests {
   }
   @Test func ompBadgeClassifiesRowAsAgent() {
     var state = makeState(name: "omp")
-    state.agents = [.init(agent: .omp, activity: .idle)]
+    state.agentSnapshot.agents = [.init(agent: .omp, activity: .idle)]
 
     let classification = SidebarActiveClassification.classify(state)
 
@@ -78,7 +78,7 @@ struct SidebarActiveClassificationTests {
   }
   @Test func grokBadgeClassifiesRowAsAgent() {
     var state = makeState(name: "grok")
-    state.agents = [.init(agent: .grok, activity: .idle)]
+    state.agentSnapshot.agents = [.init(agent: .grok, activity: .idle)]
 
     let classification = SidebarActiveClassification.classify(state)
 
@@ -112,7 +112,7 @@ struct SidebarActiveClassificationTests {
 
   @Test func agentErrorClassifiesAsErrored() {
     var state = makeState(name: "broken")
-    state.hasAgentError = true
+    state.agentSnapshot.hasError = true
 
     #expect(SidebarActiveClassification.classify(state) == .errored)
   }
@@ -121,9 +121,9 @@ struct SidebarActiveClassificationTests {
     // A session needing a manual restart must float above unread / awaiting /
     // agent / running, so the error is checked before the four-flag classifier.
     var state = makeState(name: "broken")
-    state.hasAgentError = true
+    state.agentSnapshot.hasError = true
     state.hasUnseenNotifications = true
-    state.agents = [.init(agent: .claude, activity: .errored)]
+    state.agentSnapshot.agents = [.init(agent: .claude, activity: .error)]
 
     let classification = SidebarActiveClassification.classify(state)
 

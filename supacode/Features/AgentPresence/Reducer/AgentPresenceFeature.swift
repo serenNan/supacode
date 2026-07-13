@@ -6,21 +6,28 @@ import SupacodeSettingsShared
 
 @Reducer
 struct AgentPresenceFeature {
-  /// Activity state per (surface, agent). Set atomically by the wire events
-  /// `busy` / `awaiting_input` / `idle`. The agent's Stop equivalent fires
-  /// `idle`; `awaiting_input` is an explicit prompt the user must answer.
+  /// Activity state per (surface, agent), set atomically by the wire events.
+  /// Canonical lifecycle for the two attention states:
   ///
-  /// `errored` and `compacting` ride the same atomic-set channel. `errored`
-  /// (Claude API/connection error at turn end) is sticky: no `idle` follows the
-  /// error, so it persists until the next `busy` / `session_start` (restart) or
-  /// an explicit `clearError` (tab focus) overwrites it. `compacting`
-  /// (`PreCompact`) is transient: the turn's next `busy` / `idle` clears it.
+  /// - `error`: the turn died, so no `idle` ever follows it. Sticky, and only
+  ///   `busy` (a new turn), `sessionStart` (a restart), or `clearAttention`
+  ///   (the user focused the surface) may leave it. Any other event is dropped,
+  ///   or Claude's 60s-idle `Notification` would quietly downgrade it.
+  /// - `compacting`: transient, cleared by the turn's next event or by the
+  ///   `sessionStart` Claude fires once compaction finishes.
   enum Activity: String, Sendable, Equatable {
     case awaitingInput
     case busy
     case idle
-    case errored
+    case error
     case compacting
+
+    /// Counts as the agent working: the row shimmers. Compaction happens inside a
+    /// running turn, so it must not read as a stalled agent.
+    var isWorking: Bool { self == .busy || self == .compacting }
+
+    /// Parked on the user, so focusing the surface answers it.
+    var isAttention: Bool { self == .error || self == .awaitingInput }
   }
 
   /// One badge worth of state. Surface ID is redundant; callers scope by surface set.
@@ -30,6 +37,15 @@ struct AgentPresenceFeature {
 
     /// The avatar group flips contrast on awaiting-input instances.
     var awaitingInput: Bool { activity == .awaitingInput }
+  }
+
+  /// Everything one sidebar row shows about its agents, fanned out as a single
+  /// value so a new flag doesn't grow the action or its dirty check. Compaction
+  /// needs no entry: the badge carries it, and the row treats it as work.
+  struct RowSnapshot: Equatable, Sendable {
+    var agents: [AgentInstance] = []
+    var isWorking = false
+    var hasError = false
   }
 
   // `nonisolated` so `stageRestore` (off-main at launch) can use Hashable.
@@ -67,9 +83,9 @@ struct AgentPresenceFeature {
     case stop
     case surfaceClosed(UUID)
     case surfacesClosed(Set<UUID>)
-    /// Clear the sticky `errored` activity on these surfaces (the user focused the
-    /// tab). Records return to `idle`; a still-dead agent re-errors on its next Stop.
-    case clearError(surfaces: Set<UUID>)
+    /// The user focused these surfaces, so the states parked on them (`error`,
+    /// `awaitingInput`) return to `idle`.
+    case clearAttention(surfaces: Set<UUID>)
     /// Stage records for the off-main liveness pass. Apply lands as
     /// `restoreFromSnapshotChecked` so `kill(2)` never runs on the main actor.
     case restoreFromSnapshot(staged: [PresenceKey: StagedRestore])
@@ -143,8 +159,8 @@ struct AgentPresenceFeature {
         Self.drop(surfaces: ids, from: &state)
         return Self.surfacesChangedEffect(ids)
 
-      case .clearError(let surfaces):
-        let changed = Self.clearErrors(on: surfaces, into: &state)
+      case .clearAttention(let surfaces):
+        let changed = Self.clearAttention(on: surfaces, into: &state)
         return Self.surfacesChangedEffect(changed)
 
       case .restoreFromSnapshot(let staged):
@@ -180,23 +196,7 @@ struct AgentPresenceFeature {
     let key = PresenceKey(agent: agent, surfaceID: event.surfaceID)
     switch event.eventName {
     case .sessionStart:
-      // A pid is the local-hook source (OSC presence carries `pid=$PPID` only on
-      // the local host); a missing pid is the OSC-over-SSH source, which attributes
-      // by the receiving surface and has no local pid to track.
-      if let pid = event.pid {
-        var record = state.records[key] ?? PresenceRecord(pids: [])
-        let inserted = record.pids.insert(pid).inserted
-        // A restart clears a sticky error/compaction left on the prior turn.
-        let cleared = Self.normalizeStickyOnRestart(&record)
-        state.records[key] = record
-        rebuildPresence(forSurface: event.surfaceID, in: &state)
-        return (inserted || cleared) ? [event.surfaceID] : []
-      }
-      // Pid-less OSC seed: don't clobber a record that already carries a pid.
-      guard state.records[key] == nil else { return [] }
-      state.records[key] = PresenceRecord(pids: [])
-      rebuildPresence(forSurface: event.surfaceID, in: &state)
-      return [event.surfaceID]
+      return applySessionStart(event: event, key: key, into: &state)
     case .sessionEnd:
       if let pid = event.pid {
         guard var record = state.records[key] else { return [] }
@@ -221,8 +221,8 @@ struct AgentPresenceFeature {
       return applyActivity(.awaitingInput, event: event, key: key, into: &state) ? [event.surfaceID] : []
     case .idle:
       return applyActivity(.idle, event: event, key: key, into: &state) ? [event.surfaceID] : []
-    case .apiError:
-      return applyActivity(.errored, event: event, key: key, into: &state) ? [event.surfaceID] : []
+    case .error:
+      return applyActivity(.error, event: event, key: key, into: &state) ? [event.surfaceID] : []
     case .compacting:
       return applyActivity(.compacting, event: event, key: key, into: &state) ? [event.surfaceID] : []
     case .notification, .none:
@@ -230,22 +230,47 @@ struct AgentPresenceFeature {
     }
   }
 
-  /// A restart (`session_start`) resets a sticky `errored` / `compacting` record
-  /// back to `idle`; other activities are left untouched. Returns whether it
-  /// changed anything, so the caller can report the surface as dirty even when no
-  /// new pid was inserted.
+  /// A pid is the local-hook source (OSC presence carries `pid=$PPID` only on the
+  /// local host); a missing pid is the OSC-over-SSH source, which attributes by the
+  /// receiving surface and has no local pid to track. Either way the restart clears
+  /// a sticky state, or an SSH session that errored would never recover.
+  private static func applySessionStart(
+    event: AgentHookEvent, key: PresenceKey, into state: inout State
+  ) -> Set<UUID> {
+    if let pid = event.pid {
+      var record = state.records[key] ?? PresenceRecord(pids: [])
+      let inserted = record.pids.insert(pid).inserted
+      let cleared = Self.normalizeStickyOnRestart(&record)
+      state.records[key] = record
+      rebuildPresence(forSurface: event.surfaceID, in: &state)
+      return (inserted || cleared) ? [event.surfaceID] : []
+    }
+    // Pid-less OSC seed: don't clobber a record that already carries a pid.
+    guard var record = state.records[key] else {
+      state.records[key] = PresenceRecord(pids: [])
+      rebuildPresence(forSurface: event.surfaceID, in: &state)
+      return [event.surfaceID]
+    }
+    guard Self.normalizeStickyOnRestart(&record) else { return [] }
+    state.records[key] = record
+    rebuildPresence(forSurface: event.surfaceID, in: &state)
+    return [event.surfaceID]
+  }
+
+  /// Resets a sticky `error` / `compacting` record to `idle` on a restart.
+  /// Returns whether it changed anything.
   private static func normalizeStickyOnRestart(_ record: inout PresenceRecord) -> Bool {
-    guard record.activity == .errored || record.activity == .compacting else { return false }
+    guard record.activity == .error || record.activity == .compacting else { return false }
     record.activity = .idle
     return true
   }
 
-  /// Reset the sticky `errored` activity to `idle` on the given surfaces (tab
-  /// focus). Returns the surfaces whose record actually flipped.
-  private static func clearErrors(on surfaces: Set<UUID>, into state: inout State) -> Set<UUID> {
+  /// Resets the states parked on the user (`error`, `awaitingInput`) to `idle`
+  /// on the surfaces they focused. Returns the surfaces whose record flipped.
+  private static func clearAttention(on surfaces: Set<UUID>, into state: inout State) -> Set<UUID> {
     var changed: Set<UUID> = []
     for (key, record) in state.records
-    where surfaces.contains(key.surfaceID) && record.activity == .errored {
+    where surfaces.contains(key.surfaceID) && record.activity.isAttention {
       var updated = record
       updated.activity = .idle
       state.records[key] = updated
@@ -267,6 +292,10 @@ struct AgentPresenceFeature {
   ) -> Bool {
     if var record = state.records[key] {
       guard record.activity != activity else { return false }
+      // A dead turn stays dead: only a new turn (`busy`) may overwrite `error`.
+      // Claude's 60s-idle `Notification` fires `awaitingInput` on exactly the
+      // session that just died, and would otherwise downgrade it to "waiting".
+      guard record.activity != .error || activity == .busy else { return false }
       record.activity = activity
       state.records[key] = record
       return true
@@ -414,11 +443,9 @@ extension AgentPresenceFeature.State {
   }
 
   /// One `AgentInstance` per (surface, agent) pair across the given surface list.
-  /// Duplicates preserved (a tab hosting two surfaces both
-  /// running Claude shows two Claude badges). Sorted errored-first (the red
-  /// badge leads, mirroring the row float-to-top), then awaiting-input
-  /// (contrast-flipped badges), then by agent rawValue so iteration is stable
-  /// across renders.
+  /// Duplicates preserved (a tab hosting two surfaces both running Claude shows
+  /// two Claude badges). Sorted error-first, then awaiting-input, then by agent
+  /// rawValue so iteration is stable across renders.
   func agents(
     across surfaceIDs: some Sequence<UUID>,
     badgesEnabled: Bool,
@@ -434,41 +461,55 @@ extension AgentPresenceFeature.State {
         }
       }
       .sorted { lhs, rhs in
-        // Errored leads the group (mirrors the row-level float-to-top), then
-        // awaiting-input (contrast-flipped), then agent rawValue for stability.
-        let lhsErrored = lhs.activity == .errored
-        let rhsErrored = rhs.activity == .errored
-        if lhsErrored != rhsErrored { return lhsErrored }
+        let lhsError = lhs.activity == .error
+        let rhsError = rhs.activity == .error
+        if lhsError != rhsError { return lhsError }
         if lhs.awaitingInput != rhs.awaitingInput { return lhs.awaitingInput }
         return lhs.agent.rawValue < rhs.agent.rawValue
       }
   }
 
-  /// Any agent on any of the listed surfaces is actively working (`.busy`).
-  /// Awaiting-input is excluded: the agent is parked on the user, not working,
-  /// so it must not shimmer (the inverted badge already signals that state).
-  /// Drives the sidebar shimmer alongside Ghostty progress state; not gated by
-  /// the badge toggle since the shimmer is a generic "this worktree is doing
-  /// work" signal independent of avatar visibility.
+  /// The badge lineup and the aggregates a sidebar row derives from it, in a
+  /// single pass over `records`. The error is carried by the badge itself, so it
+  /// only surfaces when badges are on; the shimmer is a generic "this worktree is
+  /// doing work" signal and stays independent of the toggle.
+  func rowSnapshot(
+    across surfaceIDs: some Sequence<UUID>,
+    badgesEnabled: Bool,
+  ) -> AgentPresenceFeature.RowSnapshot {
+    let surfaceSet = Set(surfaceIDs)
+    var isWorking = false
+    var hasError = false
+    for (key, record) in records where surfaceSet.contains(key.surfaceID) {
+      if record.activity.isWorking { isWorking = true }
+      if record.activity == .error, badgesEnabled { hasError = true }
+    }
+    return AgentPresenceFeature.RowSnapshot(
+      agents: agents(across: surfaceSet, badgesEnabled: badgesEnabled),
+      isWorking: isWorking,
+      hasError: hasError
+    )
+  }
+
+  /// Any agent on the listed surfaces is working (`busy`, or compacting inside a
+  /// running turn). Awaiting-input is excluded: the agent is parked on the user,
+  /// so it must not shimmer. Not gated by the badge toggle.
   func hasActivity(in surfaceIDs: some Sequence<UUID>) -> Bool {
     let surfaceSet = Set(surfaceIDs)
     return records.contains { entry in
-      entry.value.activity == .busy && surfaceSet.contains(entry.key.surfaceID)
+      entry.value.activity.isWorking && surfaceSet.contains(entry.key.surfaceID)
     }
   }
 
-  /// Any agent on the listed surfaces ended its turn in an API error (sticky
-  /// until restart / focus). Badge-independent — the "needs manual restart"
-  /// warning must show even when avatar badges are disabled.
+  /// Any agent on the listed surfaces ended its turn in an API error.
   func hasError(in surfaceIDs: some Sequence<UUID>) -> Bool {
     let surfaceSet = Set(surfaceIDs)
     return records.contains { entry in
-      entry.value.activity == .errored && surfaceSet.contains(entry.key.surfaceID)
+      entry.value.activity == .error && surfaceSet.contains(entry.key.surfaceID)
     }
   }
 
-  /// Any agent on the listed surfaces is compacting its context (`PreCompact`).
-  /// Badge-independent, like `hasActivity`.
+  /// Any agent on the listed surfaces is compacting its context.
   func isCompacting(in surfaceIDs: some Sequence<UUID>) -> Bool {
     let surfaceSet = Set(surfaceIDs)
     return records.contains { entry in

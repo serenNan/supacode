@@ -2,37 +2,39 @@ import SupacodeSettingsShared
 import SwiftUI
 
 /// The visual variant an agent badge renders for a given presence activity.
-/// Pure mapping so the activity → variant decision is unit-tested without a
-/// SwiftUI host.
 enum AgentBadgeVisual: Equatable {
-  /// `busy` / `idle`: the plain agent mark on the standard badge.
+  /// The plain agent mark on the standard badge.
   case normal
-  /// Contrast-flipped badge (the agent is parked on the user).
+  /// Contrast-flipped badge: the agent is parked on the user.
   case awaitingInput
-  /// Turn ended in an API error: red badge + template white mark.
-  case errored
-  /// Context compaction in progress: normal badge + a rotating ring.
+  /// Red badge the mark is knocked out of: the turn died on an error.
+  case error
+  /// Normal badge, pulsing: context compaction in progress.
   case compacting
 
   static func resolve(_ activity: AgentPresenceFeature.Activity) -> AgentBadgeVisual {
     switch activity {
-    case .errored: .errored
+    case .error: .error
     case .compacting: .compacting
     case .awaitingInput: .awaitingInput
     case .busy, .idle: .normal
     }
   }
+
+  /// Tooltip and VoiceOver text. The avatar group ignores its children for
+  /// accessibility, so it folds this into its own aggregate label.
+  func describing(_ agent: SkillAgent) -> String {
+    switch self {
+    case .error: "\(agent.displayName) stopped on an error"
+    case .compacting: "\(agent.displayName) is compacting context"
+    case .awaitingInput, .normal: agent.displayName
+    }
+  }
 }
 
-/// Circular badge with the agent's mark. Its appearance is driven by the
-/// agent's presence `activity` (see `AgentBadgeVisual`):
-/// - `awaitingInput` inverts the subtree's colorScheme so `.bar`, `.primary`,
-///   and asset variants flip together — a contrast cue that doesn't clash with
-///   marks that are already orange (Claude).
-/// - `errored` paints the circle red and renders the mark as a white template,
-///   so a silently-broken session reads as a call to action on the badge itself
-///   rather than a separate glyph beside it.
-/// - `compacting` keeps the normal mark and strokes a rotating ring around it.
+/// Circular badge with the agent's mark, styled by its presence `activity` (see
+/// `AgentBadgeVisual`). `awaitingInput` inverts the subtree's colorScheme rather
+/// than tinting, so it doesn't clash with marks that are already orange.
 struct AgentBadgeView: View {
   let agent: SkillAgent
   let size: CGFloat
@@ -47,53 +49,38 @@ struct AgentBadgeView: View {
   }
 
   var body: some View {
-    // Read `activity` at body top so SwiftUI's diffing picks up the flag the moment it flips.
     let visual = AgentBadgeVisual.resolve(activity)
     let resolvedScheme: ColorScheme =
       visual == .awaitingInput
       ? (colorScheme == .dark ? .light : .dark)
       : colorScheme
-    let markStyle: AnyShapeStyle =
-      visual == .errored
-      ? AnyShapeStyle(.white)
-      : AnyShapeStyle(resolvedScheme == .dark ? .white : .black)
+    // The errored mark is knocked out of the red circle in the scheme's own
+    // background color rather than painted on top of it.
+    let markColor: Color =
+      visual == .error
+      ? (resolvedScheme == .dark ? .black : .white)
+      : (resolvedScheme == .dark ? .white : .black)
 
     Image(agent.assetName)
-      // Force template on error so every agent's mark reads as a white glyph on
-      // the red circle; keep original colors otherwise.
-      .renderingMode(visual == .errored ? .template : .original)
+      // Force template on the red badge so a full-color mark still knocks out;
+      // `nil` elsewhere keeps each asset's own catalog intent.
+      .renderingMode(visual == .error ? .template : nil)
       .resizable()
       .aspectRatio(contentMode: .fit)
-      .accessibilityLabel(Self.accessibilityLabel(visual, agent: agent))
+      .accessibilityLabel(visual.describing(agent))
       .padding(size * 0.18)
       .frame(width: size, height: size)
-      .foregroundStyle(markStyle)
+      .foregroundStyle(markColor)
       .background(Self.badgeFill(visual).shadow(Self.dropShadow), in: .circle)
       .overlay(Circle().strokeBorder(.separator, lineWidth: pixelLength))
-      .overlay { if visual == .compacting { CompactingRing() } }
       .environment(\.colorScheme, resolvedScheme)
-      .help(Self.helpText(visual, agent: agent))
+      .help(visual.describing(agent))
       .animation(.smooth, value: activity)
+      .modifier(CompactingPulse(isActive: visual == .compacting))
   }
 
   private static func badgeFill(_ visual: AgentBadgeVisual) -> AnyShapeStyle {
-    visual == .errored ? AnyShapeStyle(.red) : AnyShapeStyle(.bar)
-  }
-
-  private static func helpText(_ visual: AgentBadgeVisual, agent: SkillAgent) -> String {
-    switch visual {
-    case .errored: "\(agent.displayName) hit an API error — needs a manual restart"
-    case .compacting: "\(agent.displayName) is compacting context…"
-    case .awaitingInput, .normal: agent.displayName
-    }
-  }
-
-  private static func accessibilityLabel(_ visual: AgentBadgeVisual, agent: SkillAgent) -> String {
-    switch visual {
-    case .errored: "\(agent.displayName), error, needs manual restart"
-    case .compacting: "\(agent.displayName), compacting context"
-    case .awaitingInput, .normal: agent.displayName
-    }
+    visual == .error ? AnyShapeStyle(.red) : AnyShapeStyle(.bar)
   }
 
   private static let dropShadow: ShadowStyle = .drop(
@@ -101,25 +88,59 @@ struct AgentBadgeView: View {
   )
 }
 
-/// A rotating arc stroked around the agent badge while it compacts context.
-/// Spins continuously; respects `accessibilityReduceMotion` by holding a static
-/// partial ring instead. Purely decorative, so it never takes hit-testing.
-private struct CompactingRing: View {
-  @State private var spinning = false
+/// Pulses the badge while the agent compacts context: it contracts, shivers, and
+/// settles back, then rests before the next pulse. Deliberately quieter than a
+/// continuous spinner, since compaction resolves on its own. Held still under
+/// `accessibilityReduceMotion`.
+private struct CompactingPulse: ViewModifier {
+  let isActive: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  var body: some View {
-    Circle()
-      .trim(from: 0, to: 0.3)
-      .stroke(.tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-      .padding(-2)
-      .rotationEffect(.degrees(spinning ? 360 : 0))
-      .onAppear {
-        guard !reduceMotion else { return }
-        withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
-          spinning = true
-        }
+  private enum Phase: CaseIterable {
+    case rest
+    case contract
+    case shiverLeft
+    case shiverRight
+    case release
+
+    var scale: CGFloat {
+      switch self {
+      case .rest, .release: 1
+      case .contract, .shiverLeft, .shiverRight: 0.78
       }
-      .allowsHitTesting(false)
+    }
+
+    var angle: Angle {
+      switch self {
+      case .shiverLeft: .degrees(-10)
+      case .shiverRight: .degrees(10)
+      case .rest, .contract, .release: .zero
+      }
+    }
+
+    /// The animation that runs INTO this phase. `rest` changes nothing, so its
+    /// duration is the gap between pulses.
+    var animation: Animation {
+      switch self {
+      case .rest: .linear(duration: 2.4)
+      case .contract: .spring(duration: 0.7)
+      case .shiverLeft, .shiverRight: .easeInOut(duration: 0.3)
+      case .release: .spring(duration: 0.9)
+      }
+    }
+  }
+
+  func body(content: Content) -> some View {
+    if isActive, !reduceMotion {
+      PhaseAnimator(Phase.allCases) { phase in
+        content
+          .scaleEffect(phase.scale)
+          .rotationEffect(phase.angle)
+      } animation: { phase in
+        phase.animation
+      }
+    } else {
+      content
+    }
   }
 }

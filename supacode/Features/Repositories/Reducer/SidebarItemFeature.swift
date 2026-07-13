@@ -101,16 +101,12 @@ struct SidebarItemFeature {
       var tint: RepositoryColor
     }
 
-    var agents: [AgentPresenceFeature.AgentInstance] = []
-    var hasAgentActivity: Bool = false
-    /// Sticky: an agent on this row ended its turn in an API/connection error and
-    /// needs a manual restart. Drives the red warning badge and the top-priority
-    /// Active-rail bucket. Cleared when the agent restarts (goes busy) or the tab
-    /// is focused. Badge-independent (shows even with avatar badges disabled).
-    var hasAgentError: Bool = false
-    /// An agent on this row is compacting its context (`PreCompact`). Transient;
-    /// drives a subtle indicator, not the error styling or priority float.
-    var isCompacting: Bool = false
+    var agentSnapshot: AgentPresenceFeature.RowSnapshot = .init()
+    var agents: [AgentPresenceFeature.AgentInstance] { agentSnapshot.agents }
+    var hasAgentActivity: Bool { agentSnapshot.isWorking }
+    /// An agent on this row stopped on an error. Sticky until it restarts or the
+    /// user focuses the surface, and the top-priority Active-rail bucket.
+    var hasAgentError: Bool { agentSnapshot.hasError }
 
     var surfaceIDs: [UUID] = []
     /// Sticky once `terminalProjectionChanged` arrives, so a subsequent
@@ -134,8 +130,7 @@ struct SidebarItemFeature {
     case diffStatsChanged(added: Int?, removed: Int?)
     case pullRequestQueryStarted(branch: String)
     case pullRequestChanged(GithubPullRequest?, branchAtQueryTime: String)
-    case agentSnapshotChanged(
-      [AgentPresenceFeature.AgentInstance], hasActivity: Bool, hasError: Bool, isCompacting: Bool)
+    case agentSnapshotChanged(AgentPresenceFeature.RowSnapshot)
     case terminalProjectionChanged(WorktreeRowProjection)
     case dragSessionChanged(isDragging: Bool)
     case focusTerminalRequested
@@ -174,15 +169,9 @@ struct SidebarItemFeature {
         state.pullRequestBranchAtQueryTime = nil
         return .none
 
-      case .agentSnapshotChanged(let agents, let hasActivity, let hasError, let isCompacting):
-        guard
-          state.agents != agents || state.hasAgentActivity != hasActivity
-            || state.hasAgentError != hasError || state.isCompacting != isCompacting
-        else { return .none }
-        state.agents = agents
-        state.hasAgentActivity = hasActivity
-        state.hasAgentError = hasError
-        state.isCompacting = isCompacting
+      case .agentSnapshotChanged(let snapshot):
+        guard state.agentSnapshot != snapshot else { return .none }
+        state.agentSnapshot = snapshot
         return .none
 
       case .terminalProjectionChanged(let projection):

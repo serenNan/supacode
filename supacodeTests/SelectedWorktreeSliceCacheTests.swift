@@ -22,13 +22,10 @@ struct SelectedWorktreeSliceCacheTests {
 
     let store = TestStore(initialState: state) { RepositoriesFeature() }
 
-    // Agent storm: only mutates `agents` / `hasAgentActivity`. Slice excludes
-    // those, so the post-reduce diff must not invalidate the cache.
+    // Agent storm: only mutates `agentSnapshot`. Slice excludes it, so the
+    // post-reduce diff must not invalidate the cache.
     await store.send(
-      .sidebarItems(
-        .element(
-          id: worktree.id,
-          action: .agentSnapshotChanged([], hasActivity: false, hasError: false, isCompacting: false)))
+      .sidebarItems(.element(id: worktree.id, action: .agentSnapshotChanged(.init())))
     )
     #expect(store.state.selectedWorktreeSlice == sliceBefore)
   }
@@ -79,10 +76,7 @@ struct SelectedWorktreeSliceCacheTests {
 
     let store = TestStore(initialState: state) { RepositoriesFeature() }
     await store.send(
-      .sidebarItems(
-        .element(
-          id: worktree.id,
-          action: .agentSnapshotChanged([], hasActivity: false, hasError: false, isCompacting: false)))
+      .sidebarItems(.element(id: worktree.id, action: .agentSnapshotChanged(.init())))
     )
 
     #expect(store.state.toolbarNotificationGroupsCache == cacheBefore)

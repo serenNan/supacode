@@ -422,6 +422,8 @@ final class WorktreeTerminalManager {
       if let previousID = selectedWorktreeID, let previousState = states[previousID] {
         previousState.rememberFocusedZoom()
         previousState.setAllSurfacesOccluded()
+        previousState.forgetLastEmittedFocus()
+        lastEmittedCoalescable.removeValue(forKey: .focus(previousID))
         markLayoutDirty(worktreeID: previousID)
       }
       selectedWorktreeID = id

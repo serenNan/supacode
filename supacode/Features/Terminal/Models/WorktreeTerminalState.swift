@@ -1020,6 +1020,14 @@ final class WorktreeTerminalState {
     }
   }
 
+  /// Drops the focus-emit dedupe so coming back to this worktree re-emits even
+  /// though the focused surface never changed. The manager pairs this with its
+  /// own coalescing entry; both have to forget, or the states parked on that
+  /// surface never clear.
+  func forgetLastEmittedFocus() {
+    lastEmittedFocusSurfaceId = nil
+  }
+
   func closeAllSurfaces() {
     let closingSurfaces = Array(surfaces.values)
     let closingSurfaceIDs = closingSurfaces.map(\.id)
