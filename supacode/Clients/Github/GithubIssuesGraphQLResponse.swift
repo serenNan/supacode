@@ -9,6 +9,7 @@ nonisolated enum GithubIssuesQuery {
     url
     updatedAt
     state
+    stateReason
     author {
       login
     }
@@ -97,6 +98,7 @@ nonisolated struct GithubIssuesGraphQLResponse: Decodable {
     let url: String
     let updatedAt: Date?
     let state: String?
+    let stateReason: String?
     let author: IssueAuthor?
     let labels: LabelConnection
     let comments: CommentConnection
@@ -110,7 +112,8 @@ nonisolated struct GithubIssuesGraphQLResponse: Decodable {
         authorLogin: author?.login,
         labels: labels.nodes,
         commentsCount: comments.totalCount,
-        isClosed: state == "CLOSED"
+        isClosed: state == "CLOSED",
+        stateReason: stateReason
       )
     }
   }

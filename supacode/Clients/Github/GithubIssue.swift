@@ -11,6 +11,10 @@ nonisolated struct GithubIssue: Decodable, Equatable, Hashable, Identifiable {
   /// Open vs. closed. Drives state-change notifications and the "Mine" list's
   /// state filter. Derived from GraphQL `state` ("OPEN"/"CLOSED").
   let isClosed: Bool
+  /// GraphQL `stateReason` for closed issues: "COMPLETED", "NOT_PLANNED", or
+  /// "REOPENED"; `nil` for open issues or older GHES. Lets the UI mirror
+  /// GitHub's purple-completed vs. gray-not-planned status glyphs.
+  let stateReason: String?
 
   var id: Int { number }
 }

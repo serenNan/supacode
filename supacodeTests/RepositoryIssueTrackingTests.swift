@@ -373,7 +373,8 @@ struct RepositoryIssueTrackingTests {
     labels: [GithubIssueLabel] = [],
     commentsCount: Int = 0,
     authorLogin: String = "octocat",
-    isClosed: Bool = false
+    isClosed: Bool = false,
+    stateReason: String? = nil
   ) -> GithubIssue {
     GithubIssue(
       number: number,
@@ -383,7 +384,8 @@ struct RepositoryIssueTrackingTests {
       authorLogin: authorLogin,
       labels: labels,
       commentsCount: commentsCount,
-      isClosed: isClosed
+      isClosed: isClosed,
+      stateReason: stateReason
     )
   }
 

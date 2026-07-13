@@ -168,9 +168,7 @@ private struct IssueRow: View {
     } label: {
       VStack(alignment: .leading, spacing: 4) {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Image(systemName: issue.isClosed ? "checkmark.circle" : "smallcircle.filled.circle")
-            .foregroundStyle(.secondary)
-            .help(issue.isClosed ? "Closed" : "Open")
+          IssueStatusIcon(issue: issue)
           Text(verbatim: "#\(issue.number)")
             .foregroundStyle(.secondary)
             .monospaced()
@@ -190,11 +188,7 @@ private struct IssueRow: View {
               .foregroundStyle(.secondary)
           }
           ForEach(issue.labels, id: \.name) { label in
-            Text(label.name)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 1)
-              .background(.quaternary, in: .capsule)
-              .foregroundStyle(.secondary)
+            GithubLabelChip(label: label)
           }
           Spacer(minLength: 0)
           if issue.commentsCount > 0 {
@@ -216,5 +210,135 @@ private struct IssueRow: View {
   private static func relativeTime(_ date: Date, now: Date) -> String {
     guard now.timeIntervalSince(date) >= 60 else { return "now" }
     return date.formatted(.relative(presentation: .named, unitsStyle: .narrow))
+  }
+}
+
+/// GitHub's issue status glyph: green dot for open, purple check for
+/// closed-completed, gray slash for closed-not-planned. SF Symbols approximate
+/// GitHub's octicons; the colors match GitHub's status semantics.
+private struct IssueStatusIcon: View {
+  let issue: GithubIssue
+
+  var body: some View {
+    Image(systemName: descriptor.symbol)
+      .foregroundStyle(descriptor.tint)
+      .help(descriptor.label)
+  }
+
+  private var descriptor: (symbol: String, tint: AnyShapeStyle, label: String) {
+    guard issue.isClosed else {
+      return ("smallcircle.filled.circle", AnyShapeStyle(.green), "Open")
+    }
+    if issue.stateReason == "NOT_PLANNED" {
+      return ("circle.slash", AnyShapeStyle(.secondary), "Closed as not planned")
+    }
+    return ("checkmark.circle.fill", AnyShapeStyle(.purple), "Closed as completed")
+  }
+}
+
+/// A GitHub label rendered like github.com: in dark mode a translucent tint of
+/// the label's own color with lightened text and a subtle same-color border; in
+/// light mode a solid fill with contrast text. The hex is API data, not app
+/// chrome, so it's exempt from the "system colors only" rule. Falls back to a
+/// neutral chip when the hex is missing or malformed.
+private struct GithubLabelChip: View {
+  let label: GithubIssueLabel
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    let style = GithubLabelStyle.resolve(hex: label.color, dark: colorScheme == .dark)
+    Text(label.name)
+      .padding(.horizontal, 7)
+      .padding(.vertical, 1)
+      .foregroundStyle(style?.text ?? AnyShapeStyle(.secondary))
+      .background(style?.background ?? AnyShapeStyle(.quaternary), in: .capsule)
+      .overlay(
+        Capsule().strokeBorder(style?.border ?? Color.clear, lineWidth: style == nil ? 0 : 1)
+      )
+  }
+}
+
+/// Resolves GitHub Primer's label colors from a hex color, per color scheme.
+enum GithubLabelStyle {
+  struct Resolved {
+    let background: AnyShapeStyle
+    let text: AnyShapeStyle
+    let border: Color
+  }
+
+  static func resolve(hex: String, dark: Bool) -> Resolved? {
+    let trimmed = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+    guard trimmed.count == 6, let value = UInt32(trimmed, radix: 16) else {
+      return nil
+    }
+    let red = Double((value >> 16) & 0xFF) / 255
+    let green = Double((value >> 8) & 0xFF) / 255
+    let blue = Double(value & 0xFF) / 255
+    // GitHub's perceived lightness: Rec. 709 luma of the raw channels.
+    let perceived = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    let (hue, saturation, lightness) = Self.hsl(red: red, green: green, blue: blue)
+
+    if dark {
+      let lightenBy = perceived < 0.6 ? (0.6 - perceived) * 100 : 0
+      let textColor = Self.color(hue: hue, saturation: saturation, lightness: min(100, lightness + lightenBy))
+      return Resolved(
+        background: AnyShapeStyle(Color(.sRGB, red: red, green: green, blue: blue, opacity: 0.18)),
+        text: AnyShapeStyle(textColor),
+        border: textColor.opacity(0.3)
+      )
+    }
+    let text: Color = perceived < 0.453 ? .white : .black
+    // Only near-white labels need a border in light mode so they don't vanish.
+    let border: Color =
+      perceived > 0.9
+      ? Self.color(hue: hue, saturation: saturation, lightness: max(0, lightness - 25)) : .clear
+    return Resolved(
+      background: AnyShapeStyle(Color(.sRGB, red: red, green: green, blue: blue)),
+      text: AnyShapeStyle(text),
+      border: border
+    )
+  }
+
+  // sRGB (0...1) -> HSL with hue in degrees, saturation and lightness in percent.
+  private static func hsl(red: Double, green: Double, blue: Double) -> (Double, Double, Double) {
+    let maxV = max(red, green, blue)
+    let minV = min(red, green, blue)
+    let lightness = (maxV + minV) / 2
+    guard maxV != minV else { return (0, 0, lightness * 100) }
+    let delta = maxV - minV
+    let saturation = lightness > 0.5 ? delta / (2 - maxV - minV) : delta / (maxV + minV)
+    let hue: Double
+    switch maxV {
+    case red: hue = (green - blue) / delta + (green < blue ? 6 : 0)
+    case green: hue = (blue - red) / delta + 2
+    default: hue = (red - green) / delta + 4
+    }
+    return (hue / 6 * 360, saturation * 100, lightness * 100)
+  }
+
+  // HSL (hue deg, saturation%, lightness%) -> SwiftUI Color.
+  private static func color(hue: Double, saturation: Double, lightness: Double) -> Color {
+    let hueFraction = hue / 360
+    let sat = saturation / 100
+    let lum = lightness / 100
+    guard sat != 0 else { return Color(.sRGB, red: lum, green: lum, blue: lum) }
+    let q = lum < 0.5 ? lum * (1 + sat) : lum + sat - lum * sat
+    let p = 2 * lum - q
+    return Color(
+      .sRGB,
+      red: Self.channel(p, q, hueFraction + 1.0 / 3),
+      green: Self.channel(p, q, hueFraction),
+      blue: Self.channel(p, q, hueFraction - 1.0 / 3)
+    )
+  }
+
+  private static func channel(_ p: Double, _ q: Double, _ t0: Double) -> Double {
+    var t = t0
+    if t < 0 { t += 1 }
+    if t > 1 { t -= 1 }
+    if t < 1.0 / 6 { return p + (q - p) * 6 * t }
+    if t < 1.0 / 2 { return q }
+    if t < 2.0 / 3 { return p + (q - p) * (2.0 / 3 - t) * 6 }
+    return p
   }
 }
