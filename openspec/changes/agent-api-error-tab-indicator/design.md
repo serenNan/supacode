@@ -4,7 +4,7 @@ Supacode surfaces agent liveness on the sidebar entirely through a hook-driven p
 
 The gap: when a Claude turn dies with an API error, Claude Code **does not** emit `StopFailure`. It synthesizes the error as a fake assistant message tagged `isApiErrorMessage:true` in the transcript JSONL and emits an ordinary `Stop` hook. Supacode's `Stop` hook is a fixed emitter (`event=idle`), so the errored session is indistinguishable from a completed one. Compaction (`PreCompact`) is a native Claude Code hook that Supacode maps to nothing.
 
-The reference implementation clawd-on-desk (`hooks/clawd-hook.js`) solves the same problem by reading the transcript tail on `Stop` and upgrading `Stop → ApiError` when a current-turn `isApiErrorMessage` entry exists. This design ports that mechanism into Supacode's shell-hook + OSC pipeline.
+Prior art: clawd-on-desk (`hooks/clawd-hook.js`, AGPL-3.0) solves the same problem by reading the transcript tail on `Stop` and upgrading `Stop → ApiError` when a current-turn `isApiErrorMessage` entry exists. This design takes the same detection *approach* (an idea operating on Claude Code's transcript format, not clawd's code) and reimplements it independently in shell `awk` for Supacode's hook + OSC pipeline — no code is copied from clawd-on-desk.
 
 ## Goals / Non-Goals
 
@@ -41,7 +41,7 @@ The `Stop` hook reads the last N KB of `transcript_path` and, in one `awk` pass,
 ## Risks / Trade-offs
 
 - **CC transcript format dependency** (`isApiErrorMessage`, `error` field; observed CC 2.1.150) → If the field is absent/renamed, the scan simply finds no match and falls back to `event=idle` — no false positives, graceful degradation. Same dependency clawd accepts.
-- **awk current-turn-gate correctness** → Port clawd's exact algorithm (last-error-index, then scan forward for user / non-error assistant) and cover it with a transcript-fixture test. A partial tail read drops the first line to avoid parsing a truncated JSON object.
+- **awk current-turn-gate correctness** → reimplement the same current-turn-gate algorithm (last-error-index, then scan forward for user / non-error assistant) independently and cover it with a transcript-fixture test. A partial tail read drops the first line to avoid parsing a truncated JSON object.
 - **Hook latency** (extra file read + awk on every `Stop`) → Bound the tail to a few KB and do a single awk pass; `Stop` is not latency-critical.
 - **Stale error after recovery** → The current-turn gate and the clear-on-`busy`/focus rules prevent a resolved error from lingering.
 - **Focus clears an unseen error** → Intended: focusing the tab means the user has seen it. Restart also clears it.

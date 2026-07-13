@@ -413,9 +413,10 @@ extension AgentPresenceFeature.State {
 
   /// One `AgentInstance` per (surface, agent) pair across the given surface list.
   /// Duplicates preserved (a tab hosting two surfaces both
-  /// running Claude shows two Claude badges). Sorted with awaiting-input
-  /// instances first (contrast-flipped badges lead the row) then by agent
-  /// rawValue so iteration is stable across renders.
+  /// running Claude shows two Claude badges). Sorted errored-first (the red
+  /// badge leads, mirroring the row float-to-top), then awaiting-input
+  /// (contrast-flipped badges), then by agent rawValue so iteration is stable
+  /// across renders.
   func agents(
     across surfaceIDs: some Sequence<UUID>,
     badgesEnabled: Bool,
@@ -431,6 +432,11 @@ extension AgentPresenceFeature.State {
         }
       }
       .sorted { lhs, rhs in
+        // Errored leads the group (mirrors the row-level float-to-top), then
+        // awaiting-input (contrast-flipped), then agent rawValue for stability.
+        let lhsErrored = lhs.activity == .errored
+        let rhsErrored = rhs.activity == .errored
+        if lhsErrored != rhsErrored { return lhsErrored }
         if lhs.awaitingInput != rhs.awaitingInput { return lhs.awaitingInput }
         return lhs.agent.rawValue < rhs.agent.rawValue
       }

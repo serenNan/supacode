@@ -281,7 +281,8 @@ public nonisolated enum AgentPresenceOSC {
 
   /// Portable `awk` that scans Claude transcript JSONL (one compact JSON object
   /// per line, oldest-first) and prints `1` iff the current turn ended in an API
-  /// error. Ports clawd-on-desk's `extractApiErrorFromEntries`: the most recent
+  /// error. Independent awk reimplementation of the same detection approach used by
+  /// clawd-on-desk, run against Claude Code's transcript format: the most recent
   /// `isApiErrorMessage:true` line (for the current `sid`, when known) marks an
   /// error; a later `type:"user"` (re-prompt) or non-error `type:"assistant"`
   /// (clean reply) means the turn moved on and the error is stale. Streaming

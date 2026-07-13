@@ -939,6 +939,21 @@ struct AgentPresenceFeatureTests {
     #expect(harness.state.records[codexKey] == nil)
   }
 
+  @Test func erroredAgentSortsToFrontOfGroup() {
+    var harness = Harness()
+    let surfaceID = UUID()
+    // Two agents on one surface. By rawValue `claude` sorts before `codex`, so
+    // the errored-first key is only proven if the errored `codex` leads.
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .codex, surfaceID: surfaceID, pid: getpid())))
+    harness.send(.hookEventReceived(makeEvent(.busy, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    harness.send(.hookEventReceived(makeEvent(.apiError, agent: .codex, surfaceID: surfaceID, pid: getpid())))
+
+    let instances = harness.state.agents(across: [surfaceID], badgesEnabled: true)
+    #expect(instances.map(\.agent) == [.codex, .claude])
+    #expect(instances.first?.activity == .errored)
+  }
+
   // MARK: - Helpers.
 
   /// Direct-reducer harness mirroring the singleton's sync API. The sweep timer

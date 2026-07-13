@@ -527,17 +527,24 @@ private struct TrailingView: View {
     let hasStats = added + removed > 0
     let hasStatus = !scriptColors.isEmpty || showsNotificationIndicator
     let hasAgentError = store.hasAgentError
-    // Error supersedes the compacting mark (a broken turn isn't compacting).
-    let isCompacting = store.isCompacting && !hasAgentError
+    let hasVisibleAgents = !agents.isEmpty
+    // When avatar badges are visible, the agent badge itself carries the error /
+    // compacting treatment (red badge / spinning ring). The standalone glyphs
+    // are only a fallback for when no avatar is shown (badges disabled), so the
+    // "needs manual restart" warning survives even then.
+    let showsErrorFallback = SidebarAgentFallback.showsError(
+      hasAgentError: hasAgentError, hasVisibleAgents: hasVisibleAgents)
+    let showsCompactingFallback = SidebarAgentFallback.showsCompacting(
+      isCompacting: store.isCompacting, hasAgentError: hasAgentError, hasVisibleAgents: hasVisibleAgents)
 
     // Cross-fade via opacity so flipping ⌘ doesn't snap the row.
     HStack(spacing: 6) {
       ZStack(alignment: .trailing) {
         HStack(spacing: 6) {
-          if hasAgentError {
+          if showsErrorFallback {
             AgentErrorBadge()
               .equatable()
-          } else if isCompacting {
+          } else if showsCompactingFallback {
             CompactingIndicator()
               .equatable()
           }
@@ -645,10 +652,28 @@ private struct RunningAgentsBadgeContent: View, Equatable {
   }
 }
 
-/// Red warning badge for a session whose agent ended its turn in an API /
-/// connection error and needs a manual restart. Deliberately distinct from the
-/// orange unread-notification dot: a broken session is a call to action, not
-/// just unread output.
+/// Whether the standalone error / compacting glyphs should render as a fallback.
+/// When the avatar badge group is visible it carries the error (red badge) and
+/// compacting (ring) treatment itself, so the sibling glyph is redundant. These
+/// glyphs are shown only when there is no visible avatar to carry the state —
+/// i.e. the user disabled avatar badges — since `hasAgentError` / `isCompacting`
+/// are badge-independent and must still surface then.
+enum SidebarAgentFallback {
+  static func showsError(hasAgentError: Bool, hasVisibleAgents: Bool) -> Bool {
+    hasAgentError && !hasVisibleAgents
+  }
+
+  /// A broken turn isn't compacting, so an error supersedes the compacting mark.
+  static func showsCompacting(isCompacting: Bool, hasAgentError: Bool, hasVisibleAgents: Bool) -> Bool {
+    isCompacting && !hasAgentError && !hasVisibleAgents
+  }
+}
+
+/// Fallback red warning glyph for a session whose agent ended its turn in an
+/// API / connection error and needs a manual restart, shown only when no avatar
+/// badge is visible to carry the state (see `SidebarAgentFallback`). Deliberately
+/// distinct from the orange unread-notification dot: a broken session is a call
+/// to action, not just unread output.
 private struct AgentErrorBadge: View, Equatable {
   var body: some View {
     Image(systemName: "exclamationmark.triangle.fill")
