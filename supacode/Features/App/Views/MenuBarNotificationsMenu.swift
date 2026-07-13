@@ -1,59 +1,43 @@
+import AppKit
 import ComposableArchitecture
 import SupacodeSettingsFeature
 import SwiftUI
 
-/// Contents of the notification menu bar extra: newest unread notifications on
-/// top, bulk actions, then app-level items. Rendered with the native `.menu`
-/// style, so rows are plain menu items (title + subtitle Texts), not custom
-/// chrome; the richer 3-line layout stays in the inspector pane.
+/// Contents of the menu bar extra: the worktrees that currently want attention
+/// (unread notifications or an active agent) on top, then quick actions.
+/// Rendered with the native `.menu` style, so rows are plain menu items
+/// (title + subtitle Texts). It lists *which* sessions need attention rather
+/// than repeating notification bodies — system notifications already carry
+/// the message text.
 struct MenuBarNotificationsMenu: View {
   let store: StoreOf<AppFeature>
-  @Environment(\.openURL) private var openURL
 
   var body: some View {
-    let list = MenuBarNotificationList.compute(groups: store.repositories.toolbarNotificationGroupsCache)
-    // Menus are rebuilt each time they open, so a plain Date() keeps the
-    // relative timestamps fresh without a ticking TimelineView.
-    let now = Date()
+    let list = MenuBarNotificationList.compute(rows: store.repositories.menuBarWorktreeRows())
     Group {
-      if list.items.isEmpty {
-        Text("No Unread Notifications")
+      if list.rows.isEmpty {
+        Text("No Sessions Need Attention")
       } else {
-        ForEach(list.items) { item in
+        ForEach(list.rows) { row in
           Button {
-            select(item)
+            store.send(.menuBarWorktreeSelected(worktreeID: row.id))
           } label: {
-            Text(item.headline)
-            Text(verbatim: subtitle(for: item, now: now))
+            Text(row.worktreeName)
+            Text(verbatim: subtitle(for: row))
           }
-          .help("Open this notification.")
+          .help("Open this worktree.")
         }
       }
       Divider()
-      Button("Show Notifications") {
-        store.send(.showNotificationsPane)
-      }
-      .help("Open the notifications pane in the main window.")
-      Button("Jump to Latest Unread") {
-        store.send(.jumpToLatestUnread)
-      }
-      .disabled(!list.hasUnread)
-      .help("Focus the terminal that sent the newest unread notification.")
       Button("Mark All as Read") {
         store.send(.markAllNotificationsRead)
       }
       .disabled(!list.hasUnread)
       .help("Mark every notification as read.")
-      Button("Clear All") {
-        store.send(.clearAllNotifications)
+      Button("Show Main Window") {
+        NSApplication.shared.surfaceMainWindow()
       }
-      .disabled(!list.hasAny)
-      .help("Remove every notification.")
-      Divider()
-      Button("Check for Updates...") {
-        store.send(.updates(.checkForUpdates))
-      }
-      .help("Check for Supacode updates.")
+      .help("Bring the main Supacode window to the front.")
       Button("Settings...") {
         store.send(.settings(.setSelection(.general)))
       }
@@ -66,41 +50,36 @@ struct MenuBarNotificationsMenu: View {
     }
   }
 
-  private func select(_ item: MenuBarNotificationItem) {
-    switch item.kind {
-    case .terminal(let worktreeID, let tabID, let surfaceID, let notificationID):
-      store.send(
-        .menuBarNotificationSelected(
-          worktreeID: worktreeID, tabID: tabID, surfaceID: surfaceID, notificationID: notificationID
-        )
-      )
-    case .issue(let notificationID, let url):
-      store.send(.repositories(.issueNotificationSelected(notificationID)))
-      if let url = URL(string: url) {
-        openURL(url)
-      }
+  private func subtitle(for row: MenuBarWorktreeRow) -> String {
+    var parts: [String] = [row.repoName]
+    if row.unreadCount > 0 {
+      parts.append(row.unreadCount == 1 ? "1 unread" : "\(row.unreadCount) unread")
     }
-  }
-
-  private func subtitle(for item: MenuBarNotificationItem, now: Date) -> String {
-    let time = Self.relativeTime(item.createdAt, now: now)
-    return item.detail.isEmpty ? time : "\(time) · \(item.detail)"
-  }
-
-  private static func relativeTime(_ date: Date, now: Date) -> String {
-    guard now.timeIntervalSince(date) >= 60 else { return "now" }
-    return date.formatted(.relative(presentation: .named, unitsStyle: .narrow))
+    if row.hasActiveAgent {
+      parts.append("agent active")
+    }
+    return parts.joined(separator: " · ")
   }
 }
 
-/// Status item label: plain bell, badged while anything is unread. Kept as its
-/// own view so notification churn invalidates just this label.
+/// Status item label: an "SC" monogram that adapts to the menu bar's light/dark
+/// appearance, with a red dot while anything is unread. Kept as its own view so
+/// notification churn invalidates just this label.
 struct MenuBarNotificationsLabel: View {
   let store: StoreOf<AppFeature>
 
   var body: some View {
     let hasUnread = store.repositories.toolbarNotificationGroupsCache.contains { $0.unreadCount > 0 }
-    Image(systemName: hasUnread ? "bell.badge" : "bell")
-      .accessibilityLabel(hasUnread ? "Supacode notifications, unread" : "Supacode notifications")
+    ZStack(alignment: .topTrailing) {
+      Text("SC")
+        .font(.system(size: 12, weight: .bold, design: .rounded))
+      if hasUnread {
+        Circle()
+          .fill(.red)
+          .frame(width: 5, height: 5)
+          .offset(x: 4, y: -2)
+      }
+    }
+    .accessibilityLabel(hasUnread ? "Supacode, unread notifications" : "Supacode")
   }
 }

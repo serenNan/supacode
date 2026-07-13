@@ -102,6 +102,17 @@ struct AppFeatureMenuBarNotificationsTests {
     #expect(marked.value.first?.1 == notificationID)
   }
 
+  @Test(.dependencies) func menuBarWorktreeSelectedSelectsWorktree() async {
+    let worktree = makeWorktree()
+    let store = makeStore(worktree: worktree) { _ in }
+
+    await store.send(.menuBarWorktreeSelected(worktreeID: worktree.id))
+    await store.receive(\.repositories.selectWorktree)
+    await store.finish()
+
+    #expect(store.state.repositories.selectedWorktreeID == worktree.id)
+  }
+
   @Test(.dependencies) func markAllNotificationsReadForwardsToTerminalClient() async {
     let worktree = makeWorktree()
     let calls = LockIsolated(0)

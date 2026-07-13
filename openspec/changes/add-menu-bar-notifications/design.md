@@ -1,50 +1,53 @@
 ## Context
 
-通知系统已完整存在：
-- 数据模型 `WorktreeTerminalNotification`（含 `isRead`）与 `RepositoryIssueNotification`，权威存储在 `WorktreeTerminalState.notifications`，TCA 投影在 `SidebarItemFeature.State`
-- 聚合缓存 `RepositoriesFeature.State.toolbarNotificationGroupsCache`（由 `computeToolbarNotificationGroups()` 纯函数计算），供工具栏铃铛 inspector 使用
-- 未读指示 `AppFeature.State.notificationIndicatorCount`（`.notificationIndicatorChanged` 事件维护）
-- 已有操作：`jumpToLatestUnread`（AppFeature）、`markNotificationRead` / `latestUnreadNotificationLocation` / `dismissAllNotifications`（manager/state 层）、`selectToolbarNotification` 跳转链
-- App 入口 `supacodeApp.swift` 全部为 `Window` scene，无任何 MenuBarExtra/NSStatusItem 代码
+现有基础：
+- 通知系统完整存在：`WorktreeTerminalNotification`（含 `isRead`）、聚合缓存 `RepositoriesFeature.State.toolbarNotificationGroupsCache`、桥接方法 `markAllNotificationsRead()`。
+- Agent presence 已被追踪：`AppFeature.State.agentPresence`，`agentsBySurface()` 给出每个 surface 的活跃 agent；surface 可映射回 worktree。
+- 上一版菜单栏功能已在 fork 实现（`MenuBarExtra` `.menu` 样式、`MenuBarNotificationsMenu` / `MenuBarNotificationsLabel`、`showMenuBarIcon: Bool`、AppFeature 的 `menuBarNotificationSelected` / `markAllNotificationsRead` / `clearAllNotifications` / `showNotificationsPane` 等 action）。本 change 是对它的重设计。
+- 应用当前**没有**任何 Dock/activation-policy 控制（`grep setActivationPolicy | LSUIElement` 在 app target 零命中；Info.plist 无 `LSUIElement`）。
+- General 设置页实际是 `AppearanceSettingsView`（`.navigationTitle("General")`），`Form { }.formStyle(.grouped)`，Editor section 在 body 中段；Appearance 用自定义卡片组 `AppearanceOptionCardView`（`Image(mode.imageName)` asset 图 + 选中描边），非 segmented Picker。
 
 ## Goals / Non-Goals
 
-**Goals:**
-- 菜单栏常驻通知入口：图标 + 未读徽标 + 下拉列表 + 快捷操作，主窗口不可见时也能触达
-- 完全复用现有通知数据与操作路径，不新增通知存储
-- 可通过设置开关显示/隐藏菜单栏图标
+**Goals**
+- 菜单栏常驻入口 + 可隐藏 Dock 的三态可见性，一套设置同时解决 #645 与 #623
+- 下拉聚焦"哪些 worktree 需要关注"（unread 或 agent 活跃），点击即跳转
+- 完全复用现有通知数据、agent presence 与选中 worktree 的路径，不新增存储
 
-**Non-Goals:**
+**Non-Goals**
 - 不改变通知的产生、去重、持久化行为
-- 不做菜单栏内的富交互面板（搜索、分组折叠等）——v1 用原生菜单
-- 不支持 LSUIElement（无 Dock 图标）模式
-- 不在菜单栏项上显示未读数字文本（仅图标变体区分）
+- 不做菜单栏内富交互面板（v1 用原生 `.menu`）
+- 不在图标上显示未读数字文本（仅红点区分）
+- 不做 Dock badge（另开）
 
 ## Decisions
 
-**D1: `MenuBarExtra` scene（`.menu` 样式）而非 AppDelegate 手建 `NSStatusItem`**
-SwiftUI `MenuBarExtra` 与现有全 SwiftUI scene 结构一致，`isInserted:` binding 天然支持设置开关，无需手动管理 NSStatusItem 生命周期。`.menu` 样式得到原生 NSMenu 外观（与 cmux 截图一致），系统处理展开/收起/键盘导航。备选 `.window` 样式可做富 UI，但需自管尺寸与 dismiss，v1 不需要。
+**D1: `AppVisibility` 三态枚举替换 `showMenuBarIcon: Bool`**
+`public enum AppVisibility: String { case dock, dockAndMenuBar, menuBar }`，放 `SupacodeSettingsShared`。派生 helper：`showsMenuBarIcon`（`dockAndMenuBar || menuBar`）、`hidesDockIcon`（`== menuBar`）。默认 `dock`（贴合维护者 "Dock enabled by default"：菜单栏 opt-in）。
+Codable 迁移：先 `decodeIfPresent(AppVisibility, forKey: .appVisibility)`；缺失时读旧 `showMenuBarIcon`（`true → dockAndMenuBar`、`false → dock`）；再缺失用默认 `dock`。旧字段仅解码、不再编码。迁移一致性：只有显式 `showMenuBarIcon == true` 的用户拿到菜单栏；其余（含缺失=菜单栏功能之前的老文件）都是 Dock-only。
 
-**D2: 不新建 MenuBarFeature reducer，菜单视图直接观察根 store**
-菜单内容全部可从现有 state 派生（`repositories.toolbarNotificationGroupsCache`），操作大多已有对应 action。仅在 AppFeature 上补少量新 action（见 D4），避免为纯展示入口引入 Scope/State 样板。菜单视图放 `supacode/Features/App/Views/MenuBarNotificationsMenu.swift`。
+**D2: activation policy 接线在 App 层**
+`supacodeApp.swift` 新增一处 `applyActivationPolicy(for:)`：`menuBar → .accessory`，其余 `→ .regular`。在 `applicationDidFinishLaunching` 应用一次，并在可见性设置变化时再应用（观察 `store.settings.appVisibility`）。从 `.accessory` 切回 `.regular` 后调用现有 `NSApplication.surfaceMainWindow()` 保证主窗口可达。`MenuBarExtra(isInserted:)` 绑定 `appVisibility.showsMenuBarIcon`，沿用现有"只在真正翻转时才写 store"的去重 binding，避免 scene→persist→scene 死循环（上一版踩过）。
 
-**D3: 徽标与列表同源——都从 `toolbarNotificationGroupsCache` 派生**
-图标 `bell` / `bell.badge` 取决于 cache 中是否存在未读（terminal + issue 通知统一计），与菜单列表内容一致，避免 `notificationIndicatorCount`（只计 terminal 通知的 worktree 数）与列表不同步的错位。列表显示最近 10 条未读，新→旧排序；terminal 通知条目显示会话/tab 名（复用 inspector 的 headline 解析逻辑，抽为共享 helper）+ 摘要 + 相对时间。
+**D3: 下拉数据 = 按-worktree 的 active/unread 行**
+`MenuBarNotificationList`（保留文件名，语义改为 worktree 关注清单）纯函数从 `toolbarNotificationGroupsCache`（未读数）+ agent 活跃集合（由 `agentsBySurface()` 归约到 worktree）派生 `[MenuBarWorktreeRow]`：字段 `worktreeID` / `repoName` / `worktreeName` / `unreadCount` / `hasActiveAgent`。纳入条件：`unreadCount > 0 || hasActiveAgent`。排序：未读优先、再按最近通知时间。空集合时菜单显示占位项。`hasUnread` 标志供"全部标记已读"禁用态。
 
-**D4: AppFeature 新增 action（配测试）**
-- `menuBarNotificationSelected(worktreeID:surfaceID:notificationID:)`：激活 app + 选中 worktree + focus surface + 标记已读（复用 `jumpToLatestUnread` 的 effect 组合方式）
-- `menuBarIssueNotificationSelected(...)`：转发到现有 `repositories.issueNotificationSelected`
-- `markAllNotificationsRead`：经 TerminalClient 桥接 manager 遍历所有 worktree 调 `markAllNotificationsRead()`（新桥接方法）
-- `clearAllNotifications`：桥接 `dismissAllNotifications()`（terminal）+ 转发 `repositories.dismissAllIssueNotifications`（issue）
-- "显示通知"复用现有打开主窗口 + 通知 inspector 的机制；"跳转到最新未读"直接发既有 `jumpToLatestUnread`
-- "检查更新"发 updates feature 既有 action；"偏好设置"用 `@Environment(\.openWindow)` 开 `WindowID.settings`；"退出"用 `NSApplication.shared.terminate`
+**D4: AppFeature action 调整**
+- 复用现有"选中 worktree + 激活 app"路径做行点击（`menuBarWorktreeSelected(worktreeID:)`：`NSApp.activate` + `repositories.selectWorktree`）。
+- 保留 `markAllNotificationsRead`（经 TerminalClient 桥接）。
+- 新增/复用"显示主窗口"：直接 `NSApplication.surfaceMainWindow()`（App 已有），菜单项走一个轻 action 或直接在 view 调用。
+- 移除菜单对 `issueNotificationSelected` / `clearAllNotifications` / `jumpToLatestUnread` / `updates(.checkForUpdates)` 的使用（action 本身若他处仍用则保留，仅从菜单摘除）。
 
-**D5: 设置开关 `showMenuBarIcon: Bool`（默认 true）**
-加在 `GlobalSettings`（default/init/Codable 用 `decodeIfPresent` 向后兼容），`SettingsFeature` binding 同步，UI 放 `NotificationsSettingsView` 的 Section。`MenuBarExtra(isInserted:)` 绑定该值。
+**D5: SC monogram 图标**
+`MenuBarNotificationsLabel` 用代码渲染 SC 字母组合（`Text("SC")` + `.font(.system(..., weight:.bold, design:.rounded))`，或 `Label`/`Canvas`），template 渲染以适配菜单栏明暗；`hasUnread` 时右上叠加 `Circle().fill(.red)` 小红点。无需新增 asset。
+
+**D6: 设置卡片组**
+新建 `AppVisibilityOptionCardView`（仿 `AppearanceOptionCardView`：图 + 标题 + 选中描边）。三态图片：优先复用/新增 asset（dock、dock+menubar、menubar 示意）；若无 asset 则以 SF Symbol 组合占位（`dock.rectangle` / `menubar.rectangle` 等），标题 `Dock` / `Dock & Menu Bar` / `Menu Bar`。放 `AppearanceSettingsView` 的 Editor section 之前，header-less `LabeledContent("Visibility") { HStack{cards} }` 或独立 Section。移除 `NotificationsSettingsView` 的旧 Toggle。
 
 ## Risks / Trade-offs
 
-- [`.menu` 样式对多行/副标题渲染受限] → 条目 label 用 title + subtitle 两个 `Text`（AppKit 菜单原生支持副标题）；若实测截断不佳，退化为单行 "会话名 — 摘要"。菜单不追求 inspector 的 3 行 hover 全文
-- [菜单从后台激活主窗口需显式 `NSApp.activate`] → 在 selected/显示通知路径统一先激活再 focus，实机验证 Space 切换行为
-- [cache 只在 repositories post-reduce 更新，菜单打开瞬间可能读到旧值] → 可接受：通知事件本身会触发 reduce，误差在毫秒级
-- [`isInserted` 关闭后设置入口只剩主窗口] → 默认值 true，且开关文案说明位置
+- [`.accessory` 后无 Dock 图标，用户找不回主窗口] → `menuBar` 模式保证菜单栏图标常显，菜单含"显示主窗口"；切回 `.regular` 主动 surface。
+- [切 activation policy 时机] → 在 launch + 设置变化两处应用；避免在每次 scene 求值时调用（会抖动）。
+- [SC monogram 在菜单栏渲染尺寸/对齐] → 实机核对明暗与红点位置；维护者已认可"SC 变体先够用"。
+- [卡片组缺 asset] → 先用 SF Symbol 占位，后续可替换真图；不阻塞功能。
+- [默认 `dock`（菜单栏 opt-in）] → 契合维护者 "Dock enabled by default"；新装用户不会平白多个菜单栏图标。

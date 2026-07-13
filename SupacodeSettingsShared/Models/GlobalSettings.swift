@@ -70,9 +70,10 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
   /// When true, remote surfaces wrap their session in zmx on the host when
   /// the host has it installed, so the session survives disconnects.
   public var remoteSessionPersistenceEnabled: Bool
-  /// When true, Supacode shows a status item in the macOS menu bar with the
-  /// unread-notification list and quick actions.
-  public var showMenuBarIcon: Bool
+  /// Where Supacode appears: Dock, menu bar, or both. The menu bar status item
+  /// is inserted when this includes the menu bar; the Dock icon is hidden in
+  /// `.menuBar` mode.
+  public var appVisibility: AppVisibility
 
   public static let `default` = GlobalSettings(
     appearanceMode: .dark,
@@ -108,7 +109,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     confirmQuitMode: .auto,
     terminateSessionsOnQuit: false,
     remoteSessionPersistenceEnabled: true,
-    showMenuBarIcon: true
+    appVisibility: .dock
   )
 
   public init(
@@ -145,7 +146,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     confirmQuitMode: ConfirmQuitMode = .auto,
     terminateSessionsOnQuit: Bool = false,
     remoteSessionPersistenceEnabled: Bool = true,
-    showMenuBarIcon: Bool = true
+    appVisibility: AppVisibility = .dock
   ) {
     self.appearanceMode = appearanceMode
     self.defaultEditorID = defaultEditorID
@@ -180,7 +181,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     self.confirmQuitMode = confirmQuitMode
     self.terminateSessionsOnQuit = terminateSessionsOnQuit
     self.remoteSessionPersistenceEnabled = remoteSessionPersistenceEnabled
-    self.showMenuBarIcon = showMenuBarIcon
+    self.appVisibility = appVisibility
   }
 
   /// Keys for reading renamed settings fields that no longer
@@ -343,8 +344,17 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     remoteSessionPersistenceEnabled =
       try container.decodeIfPresent(Bool.self, forKey: .remoteSessionPersistenceEnabled)
       ?? Self.default.remoteSessionPersistenceEnabled
-    showMenuBarIcon =
-      try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon)
-      ?? Self.default.showMenuBarIcon
+    // Prefer the new three-state field; fall back to the legacy boolean
+    // (`showMenuBarIcon`), which always shipped alongside a Dock icon —
+    // `true` → both surfaces, `false` → Dock only. Missing both → default.
+    if let visibility = try container.decodeIfPresent(AppVisibility.self, forKey: .appVisibility) {
+      appVisibility = visibility
+    } else if let legacyShowMenuBarIcon = try legacy.decodeIfPresent(
+      Bool.self, forKey: LegacyCodingKey(stringValue: "showMenuBarIcon")!)
+    {
+      appVisibility = legacyShowMenuBarIcon ? .dockAndMenuBar : .dock
+    } else {
+      appVisibility = Self.default.appVisibility
+    }
   }
 }

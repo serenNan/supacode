@@ -130,9 +130,9 @@ struct SettingsFeatureTests {
     #expect(settingsFile.global.systemNotificationsEnabled == true)
   }
 
-  @Test(.dependencies) func togglingShowMenuBarIconPersistsChanges() async {
+  @Test(.dependencies) func settingAppVisibilityPersistsChanges() async {
     var initialSettings = GlobalSettings.default
-    initialSettings.showMenuBarIcon = true
+    initialSettings.appVisibility = .dockAndMenuBar
     @Shared(.settingsFile) var settingsFile
     $settingsFile.withLock { $0.global = initialSettings }
 
@@ -140,16 +140,16 @@ struct SettingsFeatureTests {
       SettingsFeature()
     }
 
-    await store.send(.binding(.set(\.showMenuBarIcon, false))) {
-      $0.showMenuBarIcon = false
+    await store.send(.setAppVisibility(.menuBar)) {
+      $0.appVisibility = .menuBar
     }
     await store.receive(\.delegate.settingsChanged)
-    #expect(settingsFile.global.showMenuBarIcon == false)
+    #expect(settingsFile.global.appVisibility == .menuBar)
   }
 
-  @Test(.dependencies) func setShowMenuBarIconPersistsOnlyRealFlips() async {
+  @Test(.dependencies) func setAppVisibilityPersistsOnlyRealFlips() async {
     var initialSettings = GlobalSettings.default
-    initialSettings.showMenuBarIcon = true
+    initialSettings.appVisibility = .dockAndMenuBar
     @Shared(.settingsFile) var settingsFile
     $settingsFile.withLock { $0.global = initialSettings }
 
@@ -158,13 +158,13 @@ struct SettingsFeatureTests {
     }
 
     // Echo of the current value (MenuBarExtra scene evaluation) is a no-op.
-    await store.send(.setShowMenuBarIcon(true))
+    await store.send(.setAppVisibility(.dockAndMenuBar))
 
-    await store.send(.setShowMenuBarIcon(false)) {
-      $0.showMenuBarIcon = false
+    await store.send(.setAppVisibility(.dock)) {
+      $0.appVisibility = .dock
     }
     await store.receive(\.delegate.settingsChanged)
-    #expect(settingsFile.global.showMenuBarIcon == false)
+    #expect(settingsFile.global.appVisibility == .dock)
   }
 
   @Test(.dependencies) func selectingNotificationSoundPlaysPreview() async {

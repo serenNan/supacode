@@ -1,5 +1,15 @@
 # 变更日志
 
+## 2026-07-13 菜单栏功能按上游 #645/#623 重设计（可见性三态 + 关注清单）
+- 按维护者在 #645 敲定的方向重做菜单栏功能，并合并 #623（隐藏 Dock 图标）：用 `AppVisibility` 三态枚举（`dock` / `dockAndMenuBar` / `menuBar`，默认 `dock`，菜单栏 opt-in）替换 `GlobalSettings.showMenuBarIcon: Bool`
+- `menuBar` 模式经 `NSApp.setActivationPolicy(.accessory)` 隐藏 Dock 图标（应用此前无任何 activation-policy 机制）；启动时与可见性变化时应用，切回含 Dock 的模式后主动 surface 主窗口，保证 app 永不失联
+- 旧设置迁移：`showMenuBarIcon true→dockAndMenuBar / false→dock`，两字段都缺失按默认；Cmd 拖出菜单栏图标回退 `.dock`
+- 菜单栏图标从铃铛换成 SC monogram（代码渲染、适配菜单栏明暗），存在未读时叠加红点
+- 下拉从"复述通知消息"改为"按 worktree 列出需关注的会话"（有未读或 agent 活跃），未读优先排序，点击行激活 app 并选中该 worktree；移除 issue 通知项、检查更新、跳转最新未读、全部清除，新增"显示主窗口"，保留"全部标记为已读"/设置/退出
+- 设置 UI：General（`AppearanceSettingsView`）Editor section 前新增无标题可见性卡片组（仿 `AppearanceOptionCardView`，SF Symbol 占位图）；移除 Notifications 页旧的 "Show menu bar icon" 开关
+- Dock badge 未纳入本次范围（维护者建议另开 issue + PR）
+- OpenSpec change `add-menu-bar-notifications` 已按新设计重写四件套并 `openspec validate --strict` 通过；上游 PR 候选（`Closes #645`、`Closes #623`）
+
 ## 2026-07-12 归档 file-diff-viewer 提案，追踪 TODO 与 file-tree-pane 提案
 - `add-file-diff-viewer` 功能早已合入 main（`b3bca5a1`）但一直没跑 `openspec archive`，补跑后 `file-diff-viewer` capability 正式进入 `openspec/specs/`
 - 清理与已归档版本逐字节重复的 `terminal-file-link-diff-viewer` 残留草稿目录
