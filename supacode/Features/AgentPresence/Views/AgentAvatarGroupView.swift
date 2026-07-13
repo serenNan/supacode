@@ -51,7 +51,7 @@ struct AgentAvatarGroupView: View {
       return Slot(
         agent: instance.agent,
         occurrence: occurrence,
-        awaitingInput: instance.awaitingInput,
+        activity: instance.activity,
         // Leftmost on top — stable regardless of `maxVisible`.
         zIndex: Double(total - index)
       )
@@ -61,7 +61,7 @@ struct AgentAvatarGroupView: View {
   private struct Slot: Identifiable {
     let agent: SkillAgent
     let occurrence: Int
-    let awaitingInput: Bool
+    let activity: AgentPresenceFeature.Activity
     let zIndex: Double
     var id: AnyHashable { [AnyHashable(agent), AnyHashable(occurrence)] }
   }
@@ -71,7 +71,7 @@ struct AgentAvatarGroupView: View {
       HStack(spacing: 4) {
         HStack(spacing: -size * 0.35) {
           ForEach(visibleSlots) { slot in
-            AgentBadgeView(agent: slot.agent, size: size, awaitingInput: slot.awaitingInput)
+            AgentBadgeView(agent: slot.agent, size: size, activity: slot.activity)
               .zIndex(slot.zIndex)
           }
         }
