@@ -1,80 +1,84 @@
 import Foundation
+import IdentifiedCollections
+import OrderedCollections
 import SupacodeSettingsShared
 
-/// Flattened, menu-sized projection of the toolbar notification groups: the
-/// newest unread items across every repository plus the flags the menu bar
-/// extra needs to enable its bulk actions.
-struct MenuBarNotificationList: Equatable {
-  static let maxItems = 10
+/// One worktree that currently wants attention in the menu bar dropdown:
+/// it has unread notifications, a live agent, or both.
+struct MenuBarWorktreeRow: Identifiable, Equatable {
+  let id: Worktree.ID
+  let repoName: String
+  let worktreeName: String
+  let unreadCount: Int
+  let hasActiveAgent: Bool
+}
 
-  var items: [MenuBarNotificationItem] = []
-  /// True when any notification exists at all (read or unread), so "Clear All"
-  /// stays enabled after everything was marked read.
-  var hasAny = false
-  /// True when any notification is unread. Tracked separately from `items`,
-  /// which caps at `maxItems`.
+/// Menu-sized projection of the worktrees needing attention: those with unread
+/// notifications or an active agent, unread ones first. The dropdown lists
+/// *which* sessions want attention (system notifications already carry the
+/// message text), so this intentionally does not repeat notification bodies.
+struct MenuBarNotificationList: Equatable {
+  var rows: [MenuBarWorktreeRow] = []
+  /// True when any listed worktree has unread notifications, so "Mark All as
+  /// Read" can gate on it.
   var hasUnread = false
 
-  static func compute(groups: [ToolbarNotificationRepositoryGroup]) -> Self {
-    var items: [MenuBarNotificationItem] = []
-    var hasAny = false
-    for group in groups {
-      hasAny = hasAny || group.notificationCount > 0
-      for issue in group.issueNotifications where !issue.isRead {
-        items.append(
-          MenuBarNotificationItem(
-            id: issue.id,
-            headline: issue.title,
-            detail: "\(group.name) · \(issue.body)",
-            createdAt: issue.createdAt,
-            kind: .issue(notificationID: issue.id, url: issue.url)
-          )
-        )
-      }
-      for worktree in group.worktrees {
-        for notification in worktree.notifications where !notification.isRead {
-          items.append(
-            MenuBarNotificationItem(
-              id: notification.id,
-              headline: notification.headline(sessionTitle: worktree.sessionTitle(for: notification)),
-              detail: notification.body,
-              createdAt: notification.createdAt,
-              kind: .terminal(
-                worktreeID: worktree.id,
-                tabID: notification.tabID,
-                surfaceID: notification.surfaceID,
-                notificationID: notification.id
-              )
-            )
-          )
-        }
-      }
+  static func compute(rows input: [MenuBarWorktreeRow]) -> Self {
+    let attention = input.filter { $0.unreadCount > 0 || $0.hasActiveAgent }
+    let sorted = attention.sorted { lhs, rhs in
+      let lhsUnread = lhs.unreadCount > 0
+      let rhsUnread = rhs.unreadCount > 0
+      // Unread worktrees float above active-only ones.
+      if lhsUnread != rhsUnread { return lhsUnread }
+      if lhs.unreadCount != rhs.unreadCount { return lhs.unreadCount > rhs.unreadCount }
+      return lhs.worktreeName.localizedCaseInsensitiveCompare(rhs.worktreeName) == .orderedAscending
     }
-    items.sort { $0.createdAt > $1.createdAt }
-    return Self(
-      items: Array(items.prefix(maxItems)),
-      hasAny: hasAny,
-      hasUnread: !items.isEmpty
-    )
+    return Self(rows: sorted, hasUnread: attention.contains { $0.unreadCount > 0 })
   }
 }
 
-struct MenuBarNotificationItem: Identifiable, Equatable {
-  enum Kind: Equatable {
-    case terminal(
-      worktreeID: Worktree.ID,
-      tabID: TerminalTabID?,
-      surfaceID: UUID,
-      notificationID: UUID
-    )
-    case issue(notificationID: UUID, url: String)
-  }
+extension RepositoriesFeature.State {
+  /// Candidate rows for the menu bar dropdown — one per worktree that has a
+  /// sidebar row, carrying its unread count and agent-activity flag. Mirrors the
+  /// repository grouping of `computeToolbarNotificationGroups` so repo/worktree
+  /// names match the sidebar. `MenuBarNotificationList.compute` does the
+  /// attention filtering and ordering.
+  func menuBarWorktreeRows() -> [MenuBarWorktreeRow] {
+    let repositoriesByID = Dictionary(uniqueKeysWithValues: repositories.map { ($0.id, $0) })
+    var orderedIDs = orderedRepositoryIDs()
+    let coveredIDs = Set(orderedIDs)
+    for repository in repositories where repository.host != nil && !coveredIDs.contains(repository.id) {
+      orderedIDs.append(repository.id)
+    }
 
-  let id: UUID
-  let headline: String
-  let detail: String
-  let createdAt: Date
-  let kind: Kind
+    var rows: [MenuBarWorktreeRow] = []
+    for repositoryID in orderedIDs {
+      guard let repository = repositoriesByID[repositoryID] else { continue }
+      let isFolder = !repository.isGitRepository
+      let folderRow = isFolder ? sidebarItems[id: Repository.folderWorktreeID(for: repository.rootURL)] : nil
+      let section = sidebar.sections[repositoryID]
+      let repoName =
+        isFolder
+        ? (folderRow?.resolvedSidebarTitle ?? repository.name)
+        : Repository.sidebarDisplayName(custom: section?.title, fallback: repository.name)
+
+      for worktree in orderedWorktrees(in: repository) {
+        guard let row = sidebarItems[id: worktree.id] else { continue }
+        let unread = row.notifications.count { !$0.isRead }
+        guard unread > 0 || row.hasAgentActivity else { continue }
+        rows.append(
+          MenuBarWorktreeRow(
+            id: worktree.id,
+            repoName: repoName,
+            worktreeName: row.resolvedSidebarTitle ?? worktree.name,
+            unreadCount: unread,
+            hasActiveAgent: row.hasAgentActivity
+          )
+        )
+      }
+    }
+    return rows
+  }
 }
 
 extension WorktreeTerminalNotification {

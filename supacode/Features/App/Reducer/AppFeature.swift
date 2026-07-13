@@ -85,6 +85,7 @@ struct AppFeature {
     var hasAnyTerminalSurface: Bool = false
     var lastKnownSystemNotificationsEnabled: Bool
     var lastKnownAgentPresenceBadgesEnabled: Bool
+    var lastKnownAppVisibility: AppVisibility
     var pendingDeeplinks: [Deeplink] = []
     var isDeeplinkReferenceRequested = false
     /// Cached projection of every primitive the menu-bar `WorktreeCommands`
@@ -115,6 +116,7 @@ struct AppFeature {
       self.settings = settings
       lastKnownSystemNotificationsEnabled = settings.systemNotificationsEnabled
       lastKnownAgentPresenceBadgesEnabled = settings.agentPresenceBadgesEnabled
+      lastKnownAppVisibility = settings.appVisibility
       // Seed from settings so `state.allScripts` doesn't start empty before the
       // first `settingsChanged` delegate fires. Globals aren't worktree-scoped,
       // so deselection (line below in `selectedWorktreeChanged(nil)`)
@@ -212,6 +214,7 @@ struct AppFeature {
     case jumpToLatestUnread
     case menuBarNotificationSelected(
       worktreeID: Worktree.ID, tabID: TerminalTabID?, surfaceID: UUID, notificationID: UUID)
+    case menuBarWorktreeSelected(worktreeID: Worktree.ID)
     case showNotificationsPane
     case markAllNotificationsRead
     case clearAllNotifications
@@ -549,6 +552,12 @@ struct AppFeature {
         let agentBadgesFlipped =
           settings.agentPresenceBadgesEnabled != state.lastKnownAgentPresenceBadgesEnabled
         state.lastKnownAgentPresenceBadgesEnabled = settings.agentPresenceBadgesEnabled
+        let visibilityChanged = settings.appVisibility != state.lastKnownAppVisibility
+        // Surface the main window when the Dock icon comes back, so leaving
+        // menu-bar-only mode never strands the user without a window.
+        let dockIconReappeared =
+          state.lastKnownAppVisibility.hidesDockIcon && !settings.appVisibility.hidesDockIcon
+        state.lastKnownAppVisibility = settings.appVisibility
         // Compare IDs as a set — name/command edits and pure reorders should not re-prune recency.
         let globalScriptIDsChanged = Set(state.globalScripts.map(\.id)) != Set(settings.globalScripts.map(\.id))
         state.globalScripts = settings.globalScripts
@@ -605,6 +614,16 @@ struct AppFeature {
             }
           },
         ]
+        if visibilityChanged {
+          effects.append(
+            .run { @MainActor _ in
+              NSApplication.shared.applyActivationPolicy(for: settings.appVisibility)
+              if dockIconReappeared {
+                NSApplication.shared.surfaceMainWindow()
+              }
+            }
+          )
+        }
         if globalScriptIDsChanged {
           effects.append(pruneScriptRecencyEffect(state: state))
         }
@@ -792,6 +811,19 @@ struct AppFeature {
             }
             terminalClient.markNotificationRead(worktreeID, notificationID)
           }
+        )
+
+      case .menuBarWorktreeSelected(let worktreeID):
+        guard state.repositories.worktree(for: worktreeID) != nil else {
+          jumpLogger.warning(
+            "menuBarWorktreeSelected: worktree \(worktreeID) vanished between menu render and click."
+          )
+          return .none
+        }
+        analyticsClient.capture("menu_bar_worktree_selected", nil)
+        return .merge(
+          .send(.repositories(.selectWorktree(worktreeID, focusTerminal: true))),
+          .run { @MainActor _ in NSApplication.shared.surfaceMainWindow() }
         )
 
       case .showNotificationsPane:

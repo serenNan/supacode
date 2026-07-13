@@ -74,7 +74,7 @@ public struct SettingsFeature {
     public var confirmQuitMode: ConfirmQuitMode
     public var terminateSessionsOnQuit: Bool
     public var remoteSessionPersistenceEnabled: Bool
-    public var showMenuBarIcon: Bool
+    public var appVisibility: AppVisibility
     /// Chosen UI language. Persisted outside `GlobalSettings` because it maps to
     /// the system `AppleLanguages` key and is read at the earliest launch point.
     public var preferredLanguage: AppLanguage = .system
@@ -136,7 +136,7 @@ public struct SettingsFeature {
       confirmQuitMode = settings.confirmQuitMode
       terminateSessionsOnQuit = settings.terminateSessionsOnQuit
       remoteSessionPersistenceEnabled = settings.remoteSessionPersistenceEnabled
-      showMenuBarIcon = settings.showMenuBarIcon
+      appVisibility = settings.appVisibility
       defaultWorktreeBaseDirectoryPath =
         SupacodePaths.normalizedWorktreeBaseDirectoryPath(settings.defaultWorktreeBaseDirectoryPath) ?? ""
     }
@@ -178,7 +178,7 @@ public struct SettingsFeature {
         confirmQuitMode: confirmQuitMode,
         terminateSessionsOnQuit: terminateSessionsOnQuit,
         remoteSessionPersistenceEnabled: remoteSessionPersistenceEnabled,
-        showMenuBarIcon: showMenuBarIcon
+        appVisibility: appVisibility
       )
     }
   }
@@ -189,7 +189,7 @@ public struct SettingsFeature {
     case repositoriesChanged([SettingsRepositorySummary])
     case setSelection(SettingsSection?)
     case setSystemNotificationsEnabled(Bool)
-    case setShowMenuBarIcon(Bool)
+    case setAppVisibility(AppVisibility)
     case setPreferredLanguage(AppLanguage)
     case relaunchForLanguageChangeTapped
     case setAutomatedActionPolicy(AutomatedActionPolicy)
@@ -327,7 +327,7 @@ public struct SettingsFeature {
         state.confirmQuitMode = normalizedSettings.confirmQuitMode
         state.terminateSessionsOnQuit = normalizedSettings.terminateSessionsOnQuit
         state.remoteSessionPersistenceEnabled = normalizedSettings.remoteSessionPersistenceEnabled
-        state.showMenuBarIcon = normalizedSettings.showMenuBarIcon
+        state.appVisibility = normalizedSettings.appVisibility
         state.defaultWorktreeBaseDirectoryPath = normalizedSettings.defaultWorktreeBaseDirectoryPath ?? ""
         state.syncGlobalDefaults(from: normalizedSettings)
         synchronizeRepositorySelection(for: &state)
@@ -354,12 +354,12 @@ public struct SettingsFeature {
         state.syncGlobalDefaults(from: state.globalSettings)
         return persist(state)
 
-      case .setShowMenuBarIcon(let isShown):
+      case .setAppVisibility(let visibility):
         // Deduped here (not just at the caller) because `MenuBarExtra`'s
         // `isInserted` binding re-writes the current value on every scene
         // evaluation; persisting each echo would loop scene -> persist -> scene.
-        guard state.showMenuBarIcon != isShown else { return .none }
-        state.showMenuBarIcon = isShown
+        guard state.appVisibility != visibility else { return .none }
+        state.appVisibility = visibility
         state.syncGlobalDefaults(from: state.globalSettings)
         return persist(state)
 
