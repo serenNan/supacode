@@ -188,6 +188,12 @@ struct RepositoriesFeature {
     /// system-driven cleanup promotions.
     var worktreeHistoryBackStack: [Worktree.ID] = []
     var worktreeHistoryForwardStack: [Worktree.ID] = []
+    /// Session-only worktree MRU: most-recent-first, deduped, capped. Every
+    /// user-initiated worktree selection (hotkey, palette, and sidebar paths)
+    /// hoists the worktree to the head; launch-restore and validation paths
+    /// leave it untouched. Drives the ⌘P switcher sort, so ⌘P then Enter is a
+    /// Cmd+Tab-style toggle between the two most recent worktrees. Not persisted.
+    var worktreeMRU: [Worktree.ID] = []
     /// Single source of truth for all user-curated sidebar state —
     /// section order / collapse / pin / unpin / archive / focused
     /// worktree — persisted to `~/.supacode/sidebar.json`. Replaces
@@ -1747,7 +1753,7 @@ struct RepositoriesFeature {
         let previousSelection = state.selectedWorktreeID
         // Honor a deeplink-supplied pending id so a CLI completion ack can
         // correlate this exact creation through to its success / failure.
-        let pendingID = providedPendingID ?? WorktreeID("pending:\(uuid().uuidString)")
+        let pendingID = providedPendingID ?? WorktreeID("\(WorktreeID.pendingPrefix)\(uuid().uuidString)")
         @Shared(.settingsFile) var settingsFile
         @Shared(.repositorySettings(repository.rootURL, host: repository.host)) var repositorySettings
         let globalDefaultWorktreeBaseDirectoryPath = settingsFile.global.defaultWorktreeBaseDirectoryPath
@@ -5496,6 +5502,10 @@ extension RepositoriesFeature.State {
     var worktrees = repository.worktrees
     worktrees.remove(id: worktreeID)
     repositories[index] = repository.withWorktrees(worktrees)
+    // Prune the MRU here so every removal path (delete, archive, failed cleanup)
+    // drops it. `Worktree.ID` is a reusable path, so a stale entry would re-rank
+    // a freshly created worktree at the same path as recently used.
+    worktreeMRU.removeAll { $0 == worktreeID }
     return true
   }
 
@@ -5742,6 +5752,27 @@ extension RepositoriesFeature.State {
     if recordHistory {
       recordWorktreeHistoryTransition(from: previousID, to: worktreeID)
     }
+    if let worktreeID {
+      recordWorktreeMRU(worktreeID: worktreeID)
+    }
+  }
+
+  /// Hoists the selected worktree to the head of `worktreeMRU`. Called from
+  /// every user-initiated worktree selection; selection-clearing (nil) paths are
+  /// no-ops so a "select nothing" transition can't poison the MRU head.
+  mutating func recordWorktreeMRU(worktreeID: Worktree.ID) {
+    // A pending creation's synthetic id is transient and never a real row, so
+    // recording it would leave a ghost that eventually evicts real worktrees.
+    guard !worktreeID.isPending else { return }
+    if let existingIndex = worktreeMRU.firstIndex(of: worktreeID) {
+      worktreeMRU.remove(at: existingIndex)
+    }
+    worktreeMRU.insert(worktreeID, at: 0)
+    // Cap for parity with the history stacks; the switcher only ever needs the
+    // recent head, so an unbounded session-long list buys nothing.
+    if worktreeMRU.count > worktreeHistoryStackLimit {
+      worktreeMRU.removeLast(worktreeMRU.count - worktreeHistoryStackLimit)
+    }
   }
 
   /// Records a fresh worktree navigation: pushes the previous selection onto
@@ -5843,6 +5874,13 @@ extension RepositoriesFeature.State {
     selection = nextSelectedWorktreeID.map(SidebarSelection.worktree)
     sidebarSelectedWorktreeIDs = nextSidebarSelectedWorktreeIDs
     recordWorktreeHistoryTransition(from: previousSelection, to: nextSelectedWorktreeID)
+    // Sidebar selection bypasses `setSingleWorktreeSelection`, so record the
+    // worktree MRU here too. Otherwise clicking a worktree (the dominant nav
+    // path) never updates `worktreeMRU`, and the ⌘P switcher can't put the
+    // worktree you actually had open at the top.
+    if let nextSelectedWorktreeID {
+      recordWorktreeMRU(worktreeID: nextSelectedWorktreeID)
+    }
     var effects: [Effect<RepositoriesFeature.Action>] = []
     if focusTerminal,
       let nextSelectedWorktreeID,

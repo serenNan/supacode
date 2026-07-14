@@ -403,7 +403,7 @@ struct AppFeature {
         let focusedSurfaceIDs = state.repositories.sidebarItems[id: worktreeID]?.surfaceIDs ?? []
         let clearErrorEffect: Effect<Action> =
           state.agentPresence.hasError(in: focusedSurfaceIDs)
-          ? .send(.agentPresence(.clearError(surfaces: Set(focusedSurfaceIDs))))
+          ? .send(.agentPresence(.clearAttention(surfaces: Set(focusedSurfaceIDs))))
           : .none
         return .merge(
           .run { _ in
@@ -1242,7 +1242,21 @@ struct AppFeature {
         return .none
 
       case .commandPalette(.delegate(.selectWorktree(let worktreeID))):
-        return .send(.repositories(.selectWorktree(worktreeID)))
+        // Always-focused-terminal: palette completion lands focus in the
+        // chosen worktree's terminal, matching the menu/deeplink paths
+        // that already passed focusTerminal: true.
+        return .send(.repositories(.selectWorktree(worktreeID, focusTerminal: true)))
+
+      case .commandPalette(.delegate(.dismissedWithoutSelection)):
+        // Always-focused-terminal invariant. Cancellation paths (Esc, outside
+        // tap, programmatic close) don't carry a destination; refocus the
+        // current worktree's terminal so the cursor never lingers nowhere.
+        guard let worktreeID = state.repositories.selectedWorktreeID,
+          state.repositories.sidebarItems[id: worktreeID] != nil
+        else { return .none }
+        return .send(
+          .repositories(.sidebarItems(.element(id: worktreeID, action: .focusTerminalRequested)))
+        )
 
       case .commandPalette(.delegate(.checkForUpdates)):
         return .send(.updates(.checkForUpdates))
@@ -1397,12 +1411,15 @@ struct AppFeature {
         return .none
 
       case .terminalEvent(.commandPaletteToggleRequested(let worktreeID)):
-        if state.commandPalette.isPresented {
-          return .send(.commandPalette(.setPresented(false)))
+        // Ghostty's toggle action targets the command palette specifically, so force
+        // `.commands`; otherwise it would inherit the last-used mode. Selecting the
+        // originating worktree only makes sense when the palette is opening.
+        guard !state.commandPalette.isPresented else {
+          return .send(.commandPalette(.togglePresentInMode(.commands)))
         }
         return .merge(
           .send(.repositories(.selectWorktree(worktreeID))),
-          .send(.commandPalette(.setPresented(true)))
+          .send(.commandPalette(.togglePresentInMode(.commands)))
         )
       case .terminalEvent(.setupScriptConsumed(let worktreeID)):
         return .send(.repositories(.consumeSetupScript(worktreeID)))
@@ -1553,6 +1570,12 @@ struct AppFeature {
       case .terminalEvent(.agentHookEventReceived(let event)):
         return .send(.agentPresence(.hookEventReceived(event)))
 
+      // The user is looking at this surface, so whatever was parked on them there
+      // is acknowledged. Scoped to the focused surface, so a broken session in
+      // another split of the same worktree keeps its warning.
+      case .terminalEvent(.focusChanged(_, let surfaceID)):
+        return .send(.agentPresence(.clearAttention(surfaces: [surfaceID])))
+
       case .terminalEvent:
         return .none
       }
@@ -1657,21 +1680,17 @@ struct AppFeature {
     var affectedSurfaces: Set<UUID> = []
     for rowID in rowIDs {
       guard let row = state.repositories.sidebarItems[id: rowID] else { continue }
-      let agents = presence.agents(across: row.surfaceIDs, badgesEnabled: badgesEnabled)
-      let hasActivity = presence.hasActivity(in: row.surfaceIDs)
-      // Error / compaction are badge-independent: the "needs restart" warning
-      // and the compacting mark show even when avatar badges are disabled.
-      let hasError = presence.hasError(in: row.surfaceIDs)
+      let snapshot = presence.rowSnapshot(across: row.surfaceIDs, badgesEnabled: badgesEnabled)
+      // Compaction rides its own channel: `RowSnapshot` omits it, but the
+      // badge-independent compacting glyph must show even with badges disabled.
       let isCompacting = presence.isCompacting(in: row.surfaceIDs)
+      effects.append(
+        .send(.repositories(.sidebarItems(.element(id: rowID, action: .agentCompactingChanged(isCompacting)))))
+      )
       effects.append(
         .send(
           .repositories(
-            .sidebarItems(
-              .element(
-                id: rowID,
-                action: .agentSnapshotChanged(
-                  agents, hasActivity: hasActivity, hasError: hasError, isCompacting: isCompacting))
-            )
+            .sidebarItems(.element(id: rowID, action: .agentSnapshotChanged(snapshot)))
           )
         )
       )

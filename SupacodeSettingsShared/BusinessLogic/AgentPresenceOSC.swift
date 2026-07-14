@@ -222,11 +222,9 @@ public nonisolated enum AgentPresenceOSC {
     "\(kindField)=\(notifyKind);\(titleField)=\(title);\(bodyField)=\(body)"
   }
 
-  /// Emit a notify OSC with a FIXED `title` / `body` (base64-encoded here at
-  /// build time, so no runtime `base64`/`awk`). Used by the Stop hook's
-  /// API-error branch to raise a "needs manual restart" notification through the
-  /// same notify pipeline the menu bar reads. Standard base64 has no `;`/`%`, so
-  /// it is framing- and `printf`-safe with no format args.
+  /// Notify OSC whose `title` / `body` are base64-encoded when the command is
+  /// composed, so the hook needs no runtime `base64` / `awk`. Standard base64
+  /// carries no `;` or `%`, so it is framing- and `printf`-safe with no format args.
   static func emitFixedNotifyShell(agent: SkillAgent, title: String, body: String) -> String {
     let encodedTitle = Data(title.utf8).base64EncodedString()
     let encodedBody = Data(body.utf8).base64EncodedString()
@@ -276,35 +274,26 @@ public nonisolated enum AgentPresenceOSC {
   // MARK: - Stop-hook API-error probe.
 
   /// Bytes of the transcript tail the Stop-hook probe reads. Bounded so the hook
-  /// stays cheap; a turn's final entries are always at the very end of the file.
-  static let transcriptTailBytes = 65536
+  /// stays cheap. Sized well above the largest realistic entry, since a single
+  /// tool-result line can run to tens of kilobytes.
+  static let transcriptTailBytes = 262_144
 
-  /// Portable `awk` that scans Claude transcript JSONL (one compact JSON object
-  /// per line, oldest-first) and prints `1` iff the current turn ended in an API
-  /// error. Independent awk reimplementation of the same detection approach used by
-  /// clawd-on-desk, run against Claude Code's transcript format: the most recent
-  /// `isApiErrorMessage:true` line (for the current `sid`, when known) marks an
-  /// error; a later `type:"user"` (re-prompt) or non-error `type:"assistant"`
-  /// (clean reply) means the turn moved on and the error is stale. Streaming
-  /// single pass: an error line sets the flag, an invalidating line clears it, so
-  /// the END value reflects only the LAST error's tail. Substring matching assumes
-  /// compact JSON (no spaces after `:`); anything else simply fails to match and
-  /// falls back to no-error (idle), never a false positive. A partial first line
-  /// from a truncated tail read is always the oldest entry, before any recent
-  /// error, so it cannot flip the result. No single quote, so it is shell-safe
-  /// inside single-quoted `awk`.
+  /// Scans the transcript JSONL (compact, one object per line, oldest-first) and
+  /// prints `1` when the last message entry for `sid` is an API error: a later
+  /// `type:"user"` or non-error `type:"assistant"` line means the turn moved on.
+  /// An empty `sid` never matches, so a hook payload without `session_id` degrades
+  /// to idle rather than to another session's stale error. Substring matching
+  /// assumes compact JSON; anything else fails to match and yields idle, never a
+  /// spurious error. No single quote, so it survives single-quoting in shell.
   static let apiErrorScanAwk =
-    #"{if(index($0,"\"isApiErrorMessage\":true")>0){if(sid==""||index($0,"\"sessionId\":\"" sid "\"")>0)c=1;next}"#
+    #"{if(index($0,"\"isApiErrorMessage\":true")>0){if(sid!=""&&index($0,"\"sessionId\":\"" sid "\"")>0)c=1;next}"#
     + #"if(index($0,"\"type\":\"user\"")>0){c=0;next}"#
     + #"if(index($0,"\"type\":\"assistant\"")>0){c=0;next}}"#
     + #"END{printf "%s",(c?"1":"")}"#
 
-  /// Shell for the Claude `Stop` hook that captures the hook JSON on stdin and
-  /// sets `$__apierr=1` when the current turn ended in an API error. Reuses
-  /// `notifyExtractAwk` to pull `transcript_path` / `session_id` from the JSON,
-  /// then scans the transcript tail with `apiErrorScanAwk`. Leaves `$__in` set so
-  /// a following `emitNotifyShell(readsStdin: false)` reuses it (one stdin read).
-  /// SSH-portable: `awk` + `tail` only, no `jq`/`python`.
+  /// Sets `$__apierr=1` when the current turn ended in an API error. Leaves `$__in`
+  /// set so a following `emitNotifyShell(readsStdin: false)` reuses the one stdin
+  /// read. `awk` and `tail` only, so it works on a bare SSH host.
   static func stopApiErrorProbeShell() -> String {
     #"__in=$(cat); "#
       + #"__tp=$(printf '%s' "$__in" | LC_ALL=C awk -v keys="transcript_path" "#

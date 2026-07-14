@@ -26,8 +26,8 @@ extension DependencyValues {
 /// excluded from Active and (when the Pinned section is in play) fall to the
 /// bottom of Pinned alphabetically.
 enum SidebarActiveClassification: Int, CaseIterable, Comparable, Sendable {
-  /// Agent ended its turn in an API error and needs a manual restart. Highest
-  /// priority so a broken session floats above every other Active state.
+  /// An agent stopped on an error. Highest priority, so a broken session floats
+  /// above every other Active state.
   case errored = 0
   case unreadAwaitingRunning = 1
   case unreadAwaiting = 2
@@ -68,7 +68,7 @@ enum SidebarActiveClassification: Int, CaseIterable, Comparable, Sendable {
   /// Active even when the agent isn't actively working; `state.agents` is
   /// already empty when badges are disabled by the user.
   static func classify(_ state: SidebarItemFeature.State) -> Self? {
-    // A session that needs a manual restart outranks every other Active state.
+    // A broken session outranks every other Active state.
     if state.hasAgentError { return .errored }
     return classify(
       hasUnread: state.hasUnseenNotifications,
@@ -378,7 +378,7 @@ extension SidebarItemFeature.Action {
       return .toolbarNotificationGroups
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
-      .tabAgentsChanged, .tabListExpansionToggled,
+      .agentCompactingChanged, .tabAgentsChanged, .tabListExpansionToggled,
       .focusTerminalRequested, .focusTerminalConsumed:
       return []
     }

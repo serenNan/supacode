@@ -1,18 +1,18 @@
 /// Hook events emitted via the JSON envelope path. Activity events
-/// (`busy`, `awaitingInput`, `idle`) are atomic state-set. Each fires
-/// the corresponding (surface, agent) activity directly; repeated events
-/// are idempotent. The notification leg is composed in alongside an
-/// envelope by `compositeCommand(forwardStdinAsNotification:)`.
-nonisolated enum HookEvent: String {
+/// (`busy`, `awaitingInput`, `idle`, `error`, `compacting`) are atomic
+/// state-set. Each fires the corresponding (surface, agent) activity
+/// directly; repeated events are idempotent. The notification leg is composed
+/// in alongside an envelope by `compositeCommand(forwardStdinAsNotification:)`.
+nonisolated enum HookEvent: String, CaseIterable {
   case sessionStart = "session_start"
   case sessionEnd = "session_end"
   case busy
   case awaitingInput = "awaiting_input"
   case idle
-  /// Claude turn ended in an API/connection error (detected from the transcript
-  /// `isApiErrorMessage` flag, not terminal text). Sticky app-side until restart.
-  case apiError = "api_error"
-  /// Claude `PreCompact` — context compaction started. Transient app-side.
+  /// Turn ended in an API / connection error, read from the transcript rather
+  /// than from terminal text.
+  case error
+  /// Context compaction started (Claude `PreCompact`).
   case compacting
 }
 
@@ -68,22 +68,15 @@ nonisolated enum AgentHookSettingsCommand {
     return "\(oscGuardExpr) && { \(steps.joined(separator: "; ")); } >/dev/null 2>&1 || true \(ownershipMarker)"
   }
 
-  /// Claude `Stop` hook: like a composite `[.idle]` + notify, but first probes
-  /// the transcript for a current-turn API error and emits `.apiError` instead of
-  /// `.idle` when one is found. Detection is structural (transcript
-  /// `isApiErrorMessage`), not terminal-text scraping, and SSH-portable (`awk` +
-  /// `tail`, no `jq`/`python`). Claude Code emits a plain `Stop` on an API error
-  /// (not `StopFailure`), so without this probe an errored turn is
-  /// indistinguishable from a completed one. `$__in` is captured once and reused
-  /// by the trailing notify emit. See `AgentPresenceOSC.stopApiErrorProbeShell`.
+  /// Claude `Stop`: probes the transcript for a current-turn API error and emits
+  /// `.error` plus a fixed restart notify when it finds one, else `.idle` plus the
+  /// usual stdin-sourced notify. Claude reports an API error through a plain `Stop`,
+  /// so without the probe a dead turn is indistinguishable from a completed one.
   static func claudeStopCommand(agent: SkillAgent) -> String {
-    // Error branch: presence `api_error` + a fixed "needs restart" notify so the
-    // menu bar / toolbar alert fires through the normal notify pipeline. Idle
-    // branch: presence `idle` + the usual stdin-sourced notify.
     let errorBranch =
-      "\(AgentPresenceOSC.emitShell(event: .apiError, agent: agent)); "
+      "\(AgentPresenceOSC.emitShell(event: .error, agent: agent)); "
       + AgentPresenceOSC.emitFixedNotifyShell(
-        agent: agent, title: Self.apiErrorNotifyTitle, body: Self.apiErrorNotifyBody)
+        agent: agent, title: Self.errorNotifyTitle, body: Self.errorNotifyBody)
     let idleBranch =
       "\(AgentPresenceOSC.emitShell(event: .idle, agent: agent)); "
       + AgentPresenceOSC.emitNotifyShell(agent: agent, readsStdin: false)
@@ -95,9 +88,9 @@ nonisolated enum AgentHookSettingsCommand {
     return "\(oscGuardExpr) && { \(steps.joined(separator: "; ")); } >/dev/null 2>&1 || true \(ownershipMarker)"
   }
 
-  /// Fixed headline / body for the API-error notification the Stop hook raises.
-  static let apiErrorNotifyTitle = "Agent error"
-  static let apiErrorNotifyBody = "Session hit an API error - needs a manual restart"
+  /// Fixed headline / body for the error notification the Stop hook raises.
+  static let errorNotifyTitle = "Agent error"
+  static let errorNotifyBody = "Session stopped on an error"
 
   /// Guard for the OSC command: a surface id present (the no-op-outside-Supacode
   /// gate). Fires both locally and over SSH; the pid suffix inside the presence
@@ -105,4 +98,20 @@ nonisolated enum AgentHookSettingsCommand {
   private static var oscGuardExpr: String {
     #"[ -n "${\#(AgentPresenceOSC.surfaceEnvVar):-}" ]"#
   }
+
+  /// Env vars Grok must forward into hook subprocesses. Grok spawns hooks without
+  /// inheriting the terminal's `SUPACODE_*` env; `${VAR}` expansion copies from
+  /// the parent Grok process at spawn time. Presence strictly needs
+  /// `SUPACODE_SURFACE_ID` (OSC guard) and uses `SUPACODE_SOCKET_PATH` for the
+  /// local pid suffix; the remaining vars match the terminal env for parity
+  /// with other agents / future hooks.
+  static let grokHookEnvPassthrough: [String: String] = [
+    "SUPACODE_SURFACE_ID": "${SUPACODE_SURFACE_ID}",
+    "SUPACODE_SOCKET_PATH": "${SUPACODE_SOCKET_PATH}",
+    "SUPACODE_TAB_ID": "${SUPACODE_TAB_ID}",
+    "SUPACODE_WORKTREE_ID": "${SUPACODE_WORKTREE_ID}",
+    "SUPACODE_REPO_ID": "${SUPACODE_REPO_ID}",
+    "SUPACODE_ROOT_PATH": "${SUPACODE_ROOT_PATH}",
+    "SUPACODE_WORKTREE_PATH": "${SUPACODE_WORKTREE_PATH}",
+  ]
 }

@@ -23,14 +23,13 @@ struct PullRequestMergeQueueStatusTests {
 
     #expect(status?.position == 3)
     #expect(status?.positionLabel == "Position 3")
-    // The minute spelling is locale- and OS-version-sensitive (en_CA on 26.5
-    // pluralizes to "mins" while other locales keep "min"); assert the shape
-    // and the composition, not the spelling.
-    let label = status?.estimatedTimeLabel
-    #expect(label?.hasPrefix("~") == true)
-    #expect(label?.hasSuffix(" left") == true)
-    #expect(label?.contains("10") == true)
-    #expect(status?.detail == "Position 3 · \(label ?? "")")
+    #expect(status?.estimatedTimeLabel == "~10 \(Self.abbreviatedMinutes) left")
+    #expect(status?.detail == "Position 3 · ~10 \(Self.abbreviatedMinutes) left")
+  }
+
+  // macOS 26.5 changed Duration.formatted's abbreviated plural minutes from "min" to "mins".
+  private static var abbreviatedMinutes: String {
+    if #available(macOS 26.5, *) { return "mins" } else { return "min" }
   }
 
   @Test func dropsEstimatedTimeWhenZeroOrMissing() {
