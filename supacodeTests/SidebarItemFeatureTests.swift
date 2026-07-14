@@ -101,6 +101,21 @@ struct SidebarItemFeatureTests {
     #expect(store.state.hasAgentActivity)
   }
 
+  @Test func compactingFlagTracksItsOwnChannel() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    // Compaction rides its own action since `RowSnapshot` omits it.
+    await store.send(.agentCompactingChanged(true)) {
+      $0.isCompacting = true
+    }
+    // Same value: no-op.
+    await store.send(.agentCompactingChanged(true))
+    await store.send(.agentCompactingChanged(false)) {
+      $0.isCompacting = false
+    }
+  }
+
   // MARK: - Terminal projection per-field guards.
 
   @Test func terminalProjectionEachFieldGuardedIndependently() async {
