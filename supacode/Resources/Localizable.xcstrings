@@ -2451,6 +2451,16 @@
         }
       }
     },
+    "Go to Worktree": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前往 Worktree"
+          }
+        }
+      }
+    },
     "Green": {
       "localizations": {
         "zh-Hans": {
@@ -2567,6 +2577,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hook 位于 `~/.grok/hooks/supacode.json`，skill 位于 `~/.grok/skills/`。"
+          }
+        }
+      }
+    },
+    "Hooks in `~/.kimi-code/config.toml` and skill in `~/.kimi-code/skills/`. Hooks system is in Beta.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hooks 位于 `~/.kimi-code/config.toml`，skill 位于 `~/.kimi-code/skills/`。Hooks 系统处于 Beta 阶段。"
           }
         }
       }
@@ -4907,6 +4927,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "未找到 Surface"
+          }
+        }
+      }
+    },
+    "Switch between worktrees, sorted by most recently used": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Worktree 间切换，按最近使用排序"
           }
         }
       }
