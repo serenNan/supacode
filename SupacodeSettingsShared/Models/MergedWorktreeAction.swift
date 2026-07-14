@@ -14,8 +14,8 @@ public nonisolated enum MergedWorktreeAction: String, CaseIterable, Codable, Equ
 
   public var title: String {
     switch self {
-    case .archive: return "Archive"
-    case .delete: return "Delete"
+    case .archive: return String(localized: "Archive")
+    case .delete: return String(localized: "Delete")
     }
   }
 }

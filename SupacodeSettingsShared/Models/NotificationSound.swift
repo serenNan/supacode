@@ -83,7 +83,7 @@ public enum NotificationSound: String, CaseIterable, Identifiable, Codable, Send
   public var displayName: String {
     switch self {
     case .never:
-      return "Never"
+      return String(localized: "Never")
     case .supacodeClassic:
       return "Supacode Classic"
     default:

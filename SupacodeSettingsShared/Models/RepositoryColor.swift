@@ -97,13 +97,13 @@ public nonisolated enum RepositoryColor: Hashable, Sendable, Codable {
   /// Tooltip label used by `ColorSwatchRow`'s predefined swatches.
   public var displayName: String {
     switch self {
-    case .red: "Red"
-    case .orange: "Orange"
-    case .yellow: "Yellow"
-    case .green: "Green"
-    case .teal: "Teal"
-    case .blue: "Blue"
-    case .purple: "Purple"
+    case .red: String(localized: "Red")
+    case .orange: String(localized: "Orange")
+    case .yellow: String(localized: "Yellow")
+    case .green: String(localized: "Green")
+    case .teal: String(localized: "Teal")
+    case .blue: String(localized: "Blue")
+    case .purple: String(localized: "Purple")
     case .custom(let hex): hex
     }
   }

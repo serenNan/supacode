@@ -10,11 +10,11 @@ public nonisolated enum PullRequestMergeStrategy: String, CaseIterable, Codable,
   public var title: String {
     switch self {
     case .merge:
-      return "Merge"
+      return String(localized: "Merge")
     case .squash:
-      return "Squash"
+      return String(localized: "Squash")
     case .rebase:
-      return "Rebase"
+      return String(localized: "Rebase")
     }
   }
 

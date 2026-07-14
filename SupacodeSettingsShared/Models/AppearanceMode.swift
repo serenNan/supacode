@@ -12,11 +12,11 @@ public enum AppearanceMode: String, CaseIterable, Identifiable, Codable, Sendabl
   public var title: String {
     switch self {
     case .system:
-      return "Auto"
+      return String(localized: "Auto")
     case .light:
-      return "Light"
+      return String(localized: "Light")
     case .dark:
-      return "Dark"
+      return String(localized: "Dark")
     }
   }
 

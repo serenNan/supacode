@@ -1,3 +1,5 @@
+import Foundation
+
 /// Controls when automated actions (CLI commands, deeplinks) bypass
 /// user confirmation.
 public enum AutomatedActionPolicy: String, Codable, Equatable, Sendable, CaseIterable {
@@ -13,10 +15,10 @@ public enum AutomatedActionPolicy: String, Codable, Equatable, Sendable, CaseIte
   /// Human-readable label for the settings picker.
   public var displayName: String {
     switch self {
-    case .always: "Always"
-    case .cliOnly: "CLI Only"
-    case .deeplinksOnly: "Deeplinks Only"
-    case .never: "Never"
+    case .always: String(localized: "Always")
+    case .cliOnly: String(localized: "CLI Only")
+    case .deeplinksOnly: String(localized: "Deeplinks Only")
+    case .never: String(localized: "Never")
     }
   }
 

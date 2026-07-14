@@ -14,12 +14,12 @@ public enum ScriptKind: String, Codable, CaseIterable, Hashable, Sendable {
   /// Default display name shown in UI when the user hasn't provided one.
   public nonisolated var defaultName: String {
     switch self {
-    case .run: "Run"
-    case .test: "Test"
-    case .deploy: "Deploy"
-    case .lint: "Lint"
-    case .format: "Format"
-    case .custom: "Custom"
+    case .run: String(localized: "Run")
+    case .test: String(localized: "Test")
+    case .deploy: String(localized: "Deploy")
+    case .lint: String(localized: "Lint")
+    case .format: String(localized: "Format")
+    case .custom: String(localized: "Custom")
     }
   }
 

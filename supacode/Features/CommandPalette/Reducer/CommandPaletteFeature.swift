@@ -224,43 +224,43 @@ struct CommandPaletteFeature {
     [
       CommandPaletteItem(
         id: CommandPaletteItemID.globalCheckForUpdates,
-        title: "Check for Updates",
+        title: String(localized: "Check for Updates"),
         subtitle: nil,
         kind: .checkForUpdates
       ),
       CommandPaletteItem(
         id: CommandPaletteItemID.globalOpenSettings,
-        title: "Open Settings",
+        title: String(localized: "Open Settings"),
         subtitle: nil,
         kind: .openSettings
       ),
       CommandPaletteItem(
         id: CommandPaletteItemID.globalOpenRepository,
-        title: "Open Repository or Folder",
+        title: String(localized: "Open Repository or Folder"),
         subtitle: nil,
         kind: .openRepository
       ),
       CommandPaletteItem(
         id: CommandPaletteItemID.globalAddRemoteRepository,
-        title: "Add Remote Repository",
+        title: String(localized: "Add Remote Repository"),
         subtitle: nil,
         kind: .addRemoteRepository
       ),
       CommandPaletteItem(
         id: CommandPaletteItemID.globalNewWorktree,
-        title: "New Worktree",
+        title: String(localized: "New Worktree"),
         subtitle: nil,
         kind: .newWorktree
       ),
       CommandPaletteItem(
         id: CommandPaletteItemID.globalRefreshWorktrees,
-        title: "Refresh Worktrees",
+        title: String(localized: "Refresh Worktrees"),
         subtitle: nil,
         kind: .refreshWorktrees
       ),
       CommandPaletteItem(
         id: CommandPaletteItemID.globalViewArchivedWorktrees,
-        title: "View Archived Worktrees",
+        title: String(localized: "View Archived Worktrees"),
         subtitle: nil,
         kind: .viewArchivedWorktrees
       ),
@@ -326,8 +326,8 @@ struct CommandPaletteFeature {
       ?? selectedRow.name
     return CommandPaletteItem(
       id: CommandPaletteItemID.renameBranch(selectedWorktreeID),
-      title: "Rename Branch",
-      subtitle: "\(repositoryName) · \(worktreeDisplayName)",
+      title: String(localized: "Rename Branch"),
+      subtitle: String(localized: "\(repositoryName) · \(worktreeDisplayName)"),
       kind: .renameBranch(selectedWorktreeID, selectedRepositoryID)
     )
   }
@@ -482,7 +482,7 @@ private func pullRequestItems(
     guard isOpen && isDraft else { return nil }
     return CommandPaletteItem(
       id: CommandPaletteItemID.pullRequestReady(repositoryID),
-      title: "Mark PR Ready for Review",
+      title: String(localized: "Mark PR Ready for Review"),
       subtitle: pullRequest.title,
       kind: .markPullRequestReady(worktreeID),
       priorityTier: 0
@@ -499,7 +499,7 @@ private func pullRequestItems(
       failingItems.append(
         CommandPaletteItem(
           id: CommandPaletteItemID.pullRequestCopyFailingJobURL(repositoryID),
-          title: "Copy failing job URL",
+          title: String(localized: "Copy failing job URL"),
           subtitle: pullRequest.title,
           kind: .copyFailingJobURL(worktreeID),
           priorityTier: leadingTier
@@ -509,7 +509,7 @@ private func pullRequestItems(
     failingItems.append(
       CommandPaletteItem(
         id: CommandPaletteItemID.pullRequestCopyCiLogs(repositoryID),
-        title: "Copy CI Failure Logs",
+        title: String(localized: "Copy CI Failure Logs"),
         subtitle: pullRequest.title,
         kind: .copyCiFailureLogs(worktreeID),
         priorityTier: hasFailingCheckWithDetails ? followupTier : leadingTier
@@ -518,7 +518,7 @@ private func pullRequestItems(
     failingItems.append(
       CommandPaletteItem(
         id: CommandPaletteItemID.pullRequestRerunFailedJobs(repositoryID),
-        title: "Re-run Failed Jobs",
+        title: String(localized: "Re-run Failed Jobs"),
         subtitle: pullRequest.title,
         kind: .rerunFailedJobs(worktreeID),
         priorityTier: followupTier
@@ -528,7 +528,7 @@ private func pullRequestItems(
       failingItems.append(
         CommandPaletteItem(
           id: CommandPaletteItemID.pullRequestOpenFailingCheck(repositoryID),
-          title: "Open Failing Check Details",
+          title: String(localized: "Open Failing Check Details"),
           subtitle: pullRequest.title,
           kind: .openFailingCheckDetails(worktreeID),
           priorityTier: followupTier
@@ -541,7 +541,7 @@ private func pullRequestItems(
   var items: [CommandPaletteItem] = [
     CommandPaletteItem(
       id: CommandPaletteItemID.pullRequestOpen(repositoryID),
-      title: "Open PR on GitHub",
+      title: String(localized: "Open PR on GitHub"),
       subtitle: pullRequest.title,
       kind: .openPullRequest(worktreeID),
       priorityTier: 2
@@ -589,8 +589,8 @@ private func makeMergePullRequestItem(
     : "\(successfulChecks) successful checks"
   return CommandPaletteItem(
     id: CommandPaletteItemID.pullRequestMerge(repositoryID),
-    title: "Merge PR",
-    subtitle: "Merge Ready - \(successfulChecksLabel)",
+    title: String(localized: "Merge PR"),
+    subtitle: String(localized: "Merge Ready - \(successfulChecksLabel)"),
     kind: .mergePullRequest(worktreeID),
     priorityTier: 0
   )
@@ -605,7 +605,7 @@ private func makeClosePullRequestItem(
   guard isOpen else { return nil }
   return CommandPaletteItem(
     id: CommandPaletteItemID.pullRequestClose(repositoryID),
-    title: "Close PR",
+    title: String(localized: "Close PR"),
     subtitle: pullRequestTitle,
     kind: .closePullRequest(worktreeID),
     priorityTier: 1
@@ -861,7 +861,7 @@ private func scriptItems(
       items.append(
         CommandPaletteItem(
           id: CommandPaletteItemID.stopScript(script.id),
-          title: "Stop: \(script.displayName)",
+          title: String(localized: "Stop: \(script.displayName)"),
           subtitle: nil,
           kind: .stopScript(script.id, name: script.displayName),
           priorityTier: 0
@@ -873,8 +873,8 @@ private func scriptItems(
       items.append(
         CommandPaletteItem(
           id: CommandPaletteItemID.runScript(script.id),
-          title: "Configure: \(script.displayName)",
-          subtitle: "No command, opens Settings.",
+          title: String(localized: "Configure: \(script.displayName)"),
+          subtitle: String(localized: "No command, opens Settings."),
           kind: .runScript(script),
           priorityTier: CommandPaletteItem.defaultPriorityTier + 50
         )
@@ -883,7 +883,7 @@ private func scriptItems(
       items.append(
         CommandPaletteItem(
           id: CommandPaletteItemID.runScript(script.id),
-          title: "Run: \(script.displayName)",
+          title: String(localized: "Run: \(script.displayName)"),
           subtitle: nil,
           kind: .runScript(script)
         )

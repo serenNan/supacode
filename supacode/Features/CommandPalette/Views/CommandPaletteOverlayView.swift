@@ -273,15 +273,15 @@ private struct CommandPaletteRowView: View {
       .rerunFailedJobs, .openFailingCheckDetails, .worktreeSelect:
       return nil
     case .removeWorktree:
-      return "Remove"
+      return String(localized: "Remove")
     case .archiveWorktree:
-      return "Archive"
+      return String(localized: "Archive")
     case .renameBranch:
-      return "Rename"
+      return String(localized: "Rename")
     case .runScript:
-      return "Script"
+      return String(localized: "Script")
     case .stopScript:
-      return "Script"
+      return String(localized: "Script")
     #if DEBUG
       case .debugTestToast:
         return "Debug"

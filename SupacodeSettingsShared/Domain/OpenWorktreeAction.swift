@@ -100,7 +100,7 @@ public enum OpenWorktreeAction: CaseIterable, Identifiable {
 
   public var title: String {
     switch self {
-    case .finder: "Reveal in Finder"
+    case .finder: String(localized: "Reveal in Finder")
     case .editor: "$EDITOR"
     case .alacritty: "Alacritty"
     case .androidStudio: "Android Studio"

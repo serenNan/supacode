@@ -21,16 +21,16 @@ public struct RepositoryScriptsSettingsView: View {
         if store.isGitRepository {
           LifecycleScriptSection(
             text: $store.settings.setupScript,
-            title: "Setup Script",
-            subtitle: "Runs once after worktree creation.",
+            title: String(localized: "Setup Script"),
+            subtitle: String(localized: "Runs once after worktree creation."),
             icon: "truck.box.badge.clock",
             iconColor: .blue,
             footerExample: "pnpm install"
           )
           LifecycleScriptSection(
             text: $store.settings.archiveScript,
-            title: "Archive Script",
-            subtitle: "Runs before a worktree is archived.",
+            title: String(localized: "Archive Script"),
+            subtitle: String(localized: "Runs before a worktree is archived."),
             icon: "archivebox",
             iconColor: .orange,
             footerExample: "docker compose down"
@@ -38,10 +38,10 @@ public struct RepositoryScriptsSettingsView: View {
         }
         LifecycleScriptSection(
           text: $store.settings.deleteScript,
-          title: "Delete Script",
+          title: String(localized: "Delete Script"),
           subtitle: store.isGitRepository
-            ? "Runs before a worktree is deleted."
-            : "Runs before this folder is removed from Supacode.",
+            ? String(localized: "Runs before a worktree is deleted.")
+            : String(localized: "Runs before this folder is removed from Supacode."),
           icon: "trash",
           iconColor: .red,
           footerExample: "docker compose down"

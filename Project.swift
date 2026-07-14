@@ -23,6 +23,7 @@ let appResources: ResourceFileElements = [
   "supacode/Assets.xcassets",
   "supacode/notification.wav",
   "supacode/Resources/Localizable.xcstrings",
+  "supacode/Resources/InfoPlist.xcstrings",
 ]
 
 let appBuildableFolders: [BuildableFolder] = [
@@ -235,6 +236,8 @@ let project = Project(
       settings: .settings(
         base: [
           "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+          // Extract SwiftUI LocalizedStringKey literals into Localizable.xcstrings at build time.
+          "SWIFT_EMIT_LOC_STRINGS": "YES",
         ],
         defaultSettings: .essential
       )
@@ -258,6 +261,8 @@ let project = Project(
       settings: .settings(
         base: [
           "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+          // Extract SwiftUI LocalizedStringKey literals into Localizable.xcstrings at build time.
+          "SWIFT_EMIT_LOC_STRINGS": "YES",
         ],
         defaultSettings: .essential
       )

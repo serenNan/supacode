@@ -17,20 +17,20 @@ public nonisolated enum ConfirmQuitMode: String, Codable, CaseIterable, Sendable
 
   public var label: String {
     switch self {
-    case .auto: "Auto"
-    case .always: "Always"
-    case .never: "Never"
+    case .auto: String(localized: "Auto")
+    case .always: String(localized: "Always")
+    case .never: String(localized: "Never")
     }
   }
 
   public var subtitle: String {
     switch self {
     case .auto:
-      return "Confirm only when scripts are running or a worktree is being set up, archived, or deleted."
+      return String(localized: "Confirm only when scripts are running or a worktree is being set up, archived, or deleted.")
     case .always:
-      return "Always confirm before quitting."
+      return String(localized: "Always confirm before quitting.")
     case .never:
-      return "Quit immediately without confirmation."
+      return String(localized: "Quit immediately without confirmation.")
     }
   }
 }
