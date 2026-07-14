@@ -683,19 +683,17 @@ final class WorktreeTerminalState {
     focusSurface(in: tabId)
   }
 
-  @discardableResult
-  func focusAndInsertText(_ text: String) -> Bool {
+  func focusAndInsertText(_ text: String) {
     guard let tabId = tabManager.selectedTabId,
       let focusedId = focusedSurfaceIdByTab[tabId],
       let surface = surfaces[focusedId]
     else {
       terminalStateLogger.warning("focusAndInsertText: no focused surface")
-      return false
+      return
     }
     terminalStateLogger.info("focusAndInsertText: sending \(text.count) chars to surface \(focusedId)")
     surface.requestFocus()
     surface.sendText(text)
-    return true
   }
 
   func syncFocus(windowIsKey: Bool, windowIsVisible: Bool) {

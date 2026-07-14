@@ -1,5 +1,10 @@
 # 变更日志
 
+## 2026-07-14 移除内置待办面板
+- 回退 feac3c7f 引入的 TODO.md 待办面板功能：删独立 Todos 窗口、侧边栏底栏入口、reducer、文件 watcher、checklist 模型与字节级保真写入器，及全部测试与 `add-todo-panel` OpenSpec change
+- 拆掉其织入的共享钩子：AppFeature 的 `todoPanel` scope/state/action、supacodeApp 的 `TodoFileWatcherManager` 接线与 Todos `Window`、`TerminalClient.insertTextInFocusedSurface`、`WindowID.todoPanel`、ContentView 的 `TodoPanelBottomBar`、快照分类器的 `.todoPanel` 分支
+- `WorktreeTerminalState.focusAndInsertText` 还原为原 `Void` 返回（其 `Bool` 返回仅被待办的发送到会话路径消费）
+
 ## 2026-07-13 菜单栏功能按上游 #645/#623 重设计（可见性三态 + 关注清单）
 - 按维护者在 #645 敲定的方向重做菜单栏功能，并合并 #623（隐藏 Dock 图标）：用 `AppVisibility` 三态枚举（`dock` / `dockAndMenuBar` / `menuBar`，默认 `dock`，菜单栏 opt-in）替换 `GlobalSettings.showMenuBarIcon: Bool`
 - `menuBar` 模式经 `NSApp.setActivationPolicy(.accessory)` 隐藏 Dock 图标（应用此前无任何 activation-policy 机制）；启动时与可见性变化时应用，切回含 Dock 的模式后主动 surface 主窗口，保证 app 永不失联
@@ -14,13 +19,6 @@
 - `add-file-diff-viewer` 功能早已合入 main（`b3bca5a1`）但一直没跑 `openspec archive`，补跑后 `file-diff-viewer` capability 正式进入 `openspec/specs/`
 - 清理与已归档版本逐字节重复的 `terminal-file-link-diff-viewer` 残留草稿目录
 - 提交根目录 `TODO.md`（roadmap 四象限清单）与尚未实现的 `add-file-tree-pane` 提案（proposal/design/specs/tasks），此前一直是未跟踪文件
-
-## 2026-07-12 内置待办面板（todo panel）
-- 新增独立 Todos 窗口（Window 菜单 / ⌥⌘T）+ 侧边栏左下角常驻 Todos 按钮：显示当前会话项目 TODO.md 的未完成项，按标题分组；两个入口共用一套 reducer
-- 侧边栏按钮点击后在按钮上方就地展开一个规整圆角矩形面板（非 popover、无箭头指示），激活时按钮主题色高亮；面板纯显示待办内容
-- 勾选圆圈把 `- [ ]` 改成 `- [x]`（字节级保真+冲突保护），点任务文字把文本注入当前会话终端输入框（不回车）
-- 文件解析顺序：当前 worktree 根目录 TODO.md 优先，缺失回退仓库主 checkout；kqueue watcher 200ms 去抖自动刷新；独立窗口与展开面板按呈现引用计数，最后一个关闭才拆 watcher
-- OpenSpec change `add-todo-panel`；上游 PR 候选，cherry-pick 时剔除本文件与 openspec/
 
 ## 2026-07-12 菜单栏通知项（仿 cmux）
 - 新增 macOS 菜单栏铃铛（`MenuBarExtra` `.menu` 样式），存在未读通知时图标变 `bell.badge`；下拉列出最近 ≤10 条未读（terminal 通知显示会话名/摘要/相对时间，issue 通知显示标题/仓库名），点击条目激活 app、选中 worktree、聚焦对应 surface 并标已读（issue 条目开 GitHub 并标已读）

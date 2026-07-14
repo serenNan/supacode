@@ -40,9 +40,6 @@ struct AppFeatureDefaultEditorTests {
       }
     }
     await store.receive(\.worktreeSettingsLoaded)
-    await store.receive(\.todoPanel.selectionChanged) {
-      $0.todoPanel.selection = TodoPanelFeature.Selection(worktree: worktree, repositoryName: "repo")
-    }
     #expect(store.state.openActionSelection == .finder)
     #expect(store.state.repoScripts.isEmpty)
     await store.finish()
@@ -109,9 +106,6 @@ struct AppFeatureDefaultEditorTests {
       $0.openActionSelection = .terminal
       $0.repoScripts = localRepositorySettings.scripts
     }
-    await store.receive(\.todoPanel.selectionChanged) {
-      $0.todoPanel.selection = TodoPanelFeature.Selection(worktree: worktree, repositoryName: "repo")
-    }
     await store.finish()
   }
 
@@ -147,9 +141,6 @@ struct AppFeatureDefaultEditorTests {
     }
     await store.receive(\.worktreeSettingsLoaded) {
       $0.openActionSelection = expectedOpenActionSelection
-    }
-    await store.receive(\.todoPanel.selectionChanged) {
-      $0.todoPanel.selection = TodoPanelFeature.Selection(worktree: worktree, repositoryName: "repo")
     }
     await store.finish()
 
